@@ -1,0 +1,114 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Procurement OS — V1</title>
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f7fb;color:#172033}.app{display:flex;min-height:100vh}
+.side{width:235px;background:#111827;color:#dbe4f0;padding:22px 14px;position:fixed;inset:0 auto 0 0}
+.brand{font-weight:800;font-size:18px;margin-bottom:25px}.brand small{display:block;color:#8da4c7;font-size:10px;margin-top:4px}
+.nav button{width:100%;background:none;border:0;color:#b9c5d6;text-align:left;padding:11px;border-radius:8px;margin:2px 0;cursor:pointer}
+.nav button.active,.nav button:hover{background:#243149;color:#fff}.main{margin-left:235px;width:calc(100% - 235px);padding:25px}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.title h1{margin:0;font-size:25px}.muted{color:#718096;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:16px}.card,.panel{background:#fff;border:1px solid #e6ebf2;border-radius:12px;box-shadow:0 2px 8px #10204008}
+.card{padding:16px}.metric{font-size:25px;font-weight:800;margin:5px 0}.panel{margin-bottom:16px;overflow:hidden}.panel h2{font-size:15px;margin:0;padding:14px 16px;border-bottom:1px solid #edf0f5}.body{padding:16px}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:9px;border-bottom:1px solid #edf0f5;text-align:left}th{background:#f8fafc}
+.pill{display:inline-block;padding:4px 7px;border-radius:12px;font-size:10px;font-weight:bold}.green{background:#e6f7ee;color:#167346}.yellow{background:#fff5d8;color:#956a00}.red{background:#fdeaea;color:#b42323}.blue{background:#e8f0ff;color:#2559a6}
+.progress{height:8px;background:#e7ecf3;border-radius:6px;overflow:hidden}.progress i{display:block;height:100%;background:#2f6fb5}
+.ai{background:#f0f6ff;border:1px solid #cfe0fa;border-radius:10px;padding:12px;font-size:12px}.alert{padding:11px;background:#fff5f5;border-left:4px solid #c53030;font-size:12px;margin-top:10px}.success{padding:11px;background:#f0fff7;border-left:4px solid #14804a;font-size:12px;margin-top:10px}
+button.action{border:0;background:#1f4d8f;color:#fff;padding:9px 13px;border-radius:8px;font-weight:bold;cursor:pointer}.hidden{display:none}input{padding:8px;border:1px solid #d7dee8;border-radius:7px;width:120px}
+@media(max-width:750px){.side{position:static;width:100%;min-height:auto}.app{display:block}.main{margin:0;width:auto}.grid{grid-template-columns:1fr 1fr}}
+</style></head>
+<body>
+<div class="app"><aside class="side"><div class="brand">AI PROCUREMENT OS<small>South African Procurement Intelligence</small></div>
+<div class="nav">
+<button class="active" onclick="show('dashboard',this)">Executive Command Centre</button>
+<button onclick="show('tender',this)">Tender Workspace</button>
+<button onclick="show('compliance',this)">Compliance Matrix</button>
+<button onclick="show('forms',this)">Form Intelligence</button>
+<button onclick="show('boq',this)">BOQ & Pricing</button>
+<button onclick="show('submission',this)">Submission Builder</button>
+<button onclick="show('dna',this)">Company DNA</button>
+</div></aside>
+<main class="main">
+
+<section id="dashboard"><div class="top"><div class="title"><h1>Executive Command Centre</h1><div class="muted">Live test case: City of Tshwane Q02-01-2026-27</div></div><span class="pill yellow">HUMAN APPROVAL REQUIRED</span></div>
+<div class="grid">
+<div class="card"><div class="muted">Tender Readiness</div><div class="metric">61%</div><div class="progress"><i style="width:61%"></i></div></div>
+<div class="card"><div class="muted">Mandatory Items</div><div class="metric">7 / 13</div><div class="muted">6 need attention</div></div>
+<div class="card"><div class="muted">Closing</div><div class="metric">15 Sep</div><div class="muted">2026 • 10:00</div></div>
+<div class="card"><div class="muted">Preference</div><div class="metric">80 / 20</div><div class="muted">80 price + 20 goals</div></div>
+</div>
+<div class="panel"><h2>AI Daily Brief</h2><div class="body"><div class="ai"><b>Tender Copilot:</b> RFQ for supply, delivery and installation of plastic street litter bins over 12 months. Immediate risks: administrative evidence, completed MBD forms, three contactable references and complete pricing.</div>
+<div class="alert"><b>Critical:</b> The tender states that official bid documents must be completed in black ink and warns against Tippex/correction fluid; pricing corrections must be crossed out and initialled.</div>
+<div class="success"><b>Positive:</b> The invitation lists the compulsory briefing session as N/A.</div></div></div>
+</section>
+
+<section id="tender" class="hidden"><div class="top"><div class="title"><h1>Tender Workspace</h1><div class="muted">Tender Digital Twin • Q02-01-2026-27</div></div></div>
+<div class="panel"><h2>Digital Twin</h2><div class="body"><div class="grid">
+<div><b>Client</b><br>City of Tshwane Metropolitan Municipality</div><div><b>Department</b><br>Environment & Agriculture Management</div><div><b>Bid</b><br>Q02-01-2026-27</div><div><b>Validity</b><br>90 days</div></div>
+<div class="ai"><b>Scope:</b> Supply, delivery and installation of plastic street litter bins at various sites in public spaces, as and when required, over 12 months.</div></div></div>
+<div class="panel"><h2>Technical Intelligence</h2><div class="body"><ul style="font-size:12px;line-height:1.8">
+<li>One bin is expected to be manufactured for City approval before mass production.</li>
+<li>Installation uses anchor bolts between M6 and M20.</li><li>Base cavity is ballasted with concrete up to 100mm.</li>
+<li>Where concrete is poured before installation, the document specifies at least 15 MPa.</li>
+<li>Bidder supplies its own installation equipment/materials.</li><li>City may require samples before delivery.</li></ul></div></div></section>
+
+<section id="compliance" class="hidden"><div class="top"><div class="title"><h1>Compliance Matrix</h1><div class="muted">Requirement → Evidence → Status → Action</div></div></div>
+<div class="panel"><h2>Administrative & Mandatory Requirements</h2><div class="body"><table>
+<tr><th>Requirement</th><th>Type</th><th>Status</th><th>AI Action</th></tr>
+<tr><td>Tax compliance PIN / CSD tax status</td><td>Mandatory</td><td><span class="pill yellow">VERIFY</span></td><td>Open evidence</td></tr>
+<tr><td>Valid CSD registration</td><td>Mandatory</td><td><span class="pill green">FOUND</span></td><td>Check expiry</td></tr>
+<tr><td>Bidder municipal account / lease evidence</td><td>Mandatory</td><td><span class="pill red">MISSING</span></td><td>Request upload</td></tr>
+<tr><td>Owners/directors municipal evidence</td><td>Mandatory</td><td><span class="pill red">MISSING</span></td><td>Request documents</td></tr>
+<tr><td>MBD 1,4,5,8,9 completed and signed</td><td>Mandatory</td><td><span class="pill yellow">IN PROGRESS</span></td><td>Open Form Intelligence</td></tr>
+<tr><td>Minimum three contactable reference letters</td><td>Mandatory</td><td><span class="pill red">MISSING</span></td><td>Add 3 references</td></tr>
+<tr><td>Complete pricing schedule</td><td>Mandatory</td><td><span class="pill yellow">IN PROGRESS</span></td><td>Open pricing</td></tr>
+</table></div></div>
+<div class="panel"><h2>Specific Goals — 20 points</h2><div class="body"><table>
+<tr><th>Goal</th><th>Max</th><th>Evidence</th><th>Status</th></tr>
+<tr><td>B-BBEE level</td><td>8</td><td>Certificate / qualifying evidence</td><td><span class="pill yellow">VERIFY</span></td></tr>
+<tr><td>EME/QSE</td><td>2</td><td>Supporting evidence</td><td><span class="pill yellow">VERIFY</span></td></tr>
+<tr><td>≥51% women-owned</td><td>2</td><td>ID + ownership</td><td><span class="pill blue">NOT CLAIMED</span></td></tr>
+<tr><td>≥51% disability-owned</td><td>2</td><td>Medical + ownership</td><td><span class="pill blue">NOT CLAIMED</span></td></tr>
+<tr><td>≥51% youth-owned</td><td>2</td><td>ID + ownership</td><td><span class="pill blue">NOT CLAIMED</span></td></tr>
+<tr><td>Local Economic Participation</td><td>4/2/1</td><td>Municipal account / lease</td><td><span class="pill yellow">VERIFY</span></td></tr>
+</table></div></div></section>
+
+<section id="forms" class="hidden"><div class="top"><div class="title"><h1>Form Intelligence</h1><div class="muted">Field mapping • signatures • official-form protection</div></div></div>
+<div class="panel"><h2>Form Completion Tracker</h2><div class="body"><table>
+<tr><th>Form</th><th>Purpose</th><th>Safe auto-fill</th><th>Status</th></tr>
+<tr><td>MBD 1</td><td>Invitation to Bid</td><td>Bid/company/CSD/VAT/contact fields</td><td><span class="pill yellow">VERIFY</span></td></tr>
+<tr><td>MBD 4</td><td>Declaration of Interest</td><td>Company/director data</td><td><span class="pill red">INCOMPLETE</span></td></tr>
+<tr><td>MBD 5</td><td>Declaration</td><td>Company data</td><td><span class="pill red">INCOMPLETE</span></td></tr>
+<tr><td>MBD 6.1</td><td>Preference points</td><td>DNA evidence + goals</td><td><span class="pill yellow">VERIFY</span></td></tr>
+<tr><td>MBD 8</td><td>Past SCM practices</td><td>Company/director data</td><td><span class="pill yellow">VERIFY</span></td></tr>
+<tr><td>MBD 9</td><td>Independent bid determination</td><td>Bidder/bid data</td><td><span class="pill yellow">VERIFY</span></td></tr>
+</table><div class="ai" style="margin-top:12px"><b>Form Lock:</b> preserve the official form layout. The system can populate safe fields and identify missing fields, but signatures and declarations require human confirmation.</div></div></div></section>
+
+<section id="boq" class="hidden"><div class="top"><div class="title"><h1>BOQ & Pricing War Room</h1><div class="muted">Versioned pricing • margin protection</div></div><button class="action" onclick="alert('Demo: new pricing scenario created.')">Create Scenario</button></div>
+<div class="panel"><h2>Price Schedule</h2><div class="body"><table><tr><th>Item</th><th>Material No.</th><th>Description</th><th>Qty</th><th>Unit price excl VAT</th></tr>
+<tr><td>1</td><td>200000005491</td><td>Plastic street litter bins — Black</td><td>1</td><td><input placeholder="R 0.00"></td></tr>
+<tr><td>2</td><td>200000005493</td><td>Plastic street litter bins — Blue</td><td>1</td><td><input placeholder="R 0.00"></td></tr>
+<tr><td>3</td><td>200000005494</td><td>Plastic street litter bins — Green</td><td>1</td><td><input placeholder="R 0.00"></td></tr>
+<tr><td>4</td><td>200000005495</td><td>Plastic street litter bins — Red</td><td>1</td><td><input placeholder="R 0.00"></td></tr>
+<tr><td>5</td><td>200000005496</td><td>Plastic street litter bins — White</td><td>1</td><td><input placeholder="R 0.00"></td></tr>
+<tr><td>6</td><td>200000005497</td><td>Plastic street litter bins — Yellow</td><td>1</td><td><input placeholder="R 0.00"></td></tr>
+</table><div class="ai" style="margin-top:12px"><b>Pricing controls:</b> keep Aggressive, Balanced and Conservative versions; never silently overwrite the BOQ. The tender specifies VAT at 15% and allows quantity changes subject to budget availability.</div></div></div></section>
+
+<section id="submission" class="hidden"><div class="top"><div class="title"><h1>Submission Builder</h1><div class="muted">Pack generation • validation • approval gate</div></div><button class="action" onclick="alert('Demo: pack generated. Human approval still required.')">Generate Pack</button></div>
+<div class="panel"><h2>TENDER-Q02-01-2026-27</h2><div class="body"><div class="progress"><i style="width:61%"></i></div><p class="muted">61% readiness</p><table>
+<tr><th>Section</th><th>Status</th></tr><tr><td>00_INDEX</td><td><span class="pill green">READY</span></td></tr>
+<tr><td>01_TENDER_FORMS</td><td><span class="pill yellow">IN PROGRESS</span></td></tr><tr><td>02_ANNEXURES</td><td><span class="pill red">MISSING</span></td></tr>
+<tr><td>03_PRICING</td><td><span class="pill yellow">IN PROGRESS</span></td></tr><tr><td>04_COMPLIANCE</td><td><span class="pill red">MISSING</span></td></tr>
+<tr><td>05_REFERENCES</td><td><span class="pill red">MISSING</span></td></tr></table>
+<div class="alert"><b>Submission gate:</b> final online submission must remain a human-approved action unless an authorised integration confirms submission.</div></div></div></section>
+
+<section id="dna" class="hidden"><div class="top"><div class="title"><h1>Company DNA</h1><div class="muted">Digital company passport</div></div><button class="action" onclick="alert('Demo: evidence upload opened.')">Upload Evidence</button></div>
+<div class="grid"><div class="card"><div class="muted">CSD</div><div class="metric">FOUND</div></div><div class="card"><div class="muted">B-BBEE</div><div class="metric">VERIFY</div></div><div class="card"><div class="muted">References</div><div class="metric">0 / 3</div></div><div class="card"><div class="muted">Municipal evidence</div><div class="metric">MISSING</div></div></div>
+<div class="panel"><h2>Evidence Locker</h2><div class="body"><table><tr><th>Evidence</th><th>Status</th><th>Used by</th></tr>
+<tr><td>CSD Summary</td><td><span class="pill green">FOUND</span></td><td>Tax/CSD checks</td></tr><tr><td>B-BBEE Certificate</td><td><span class="pill yellow">VERIFY</span></td><td>Preference points</td></tr>
+<tr><td>Municipal Account / Lease</td><td><span class="pill red">MISSING</span></td><td>Admin + local points</td></tr><tr><td>Reference Letters</td><td><span class="pill red">MISSING</span></td><td>Mandatory references</td></tr>
+</table></div></div></section>
+</main></div>
+<script>
+function show(id,b){document.querySelectorAll('main section').forEach(x=>x.classList.add('hidden'));document.getElementById(id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');scrollTo(0,0)}
+</script></body></html>
