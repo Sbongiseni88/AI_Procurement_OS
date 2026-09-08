@@ -19,6 +19,16 @@ These rules apply to every entry added below.
    with provenance and a `VERIFY` posture where confidence is not absolute. Human approval
    is mandatory before pack generation (T7.4).
 
+## Client Selection
+
+Before adding an entry below, pick the right Supabase client (see ARCHITECTURE.md §7):
+
+| Need                                                       | Use                                              |
+| ---------------------------------------------------------- | ------------------------------------------------ |
+| Read/write as the signed-in user (almost always)           | `createSupabaseServerClient()`                   |
+| Client Component needing live data                         | `createSupabaseBrowserClient()`                  |
+| Genuine cross-tenant work: migrations, cron, admin tooling | `createSupabaseAdminClient()` — **bypasses RLS** |
+
 ## Endpoint Register
 
 | Route / Action | Kind | Auth | Request schema | Response schema | Task |

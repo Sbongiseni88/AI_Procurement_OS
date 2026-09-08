@@ -16,3 +16,6 @@ v1Prototype/
 CLAUDE.md
 AGENTS.md
 .claude/
+
+# Env files have no Prettier parser.
+.env*

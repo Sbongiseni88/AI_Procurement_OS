@@ -60,10 +60,20 @@ enforcement point; the service layer is convenience on top of it.
 
 ```
 /
-├── src/app/              # Next.js App Router — routes, layouts, route handlers
-│   ├── globals.css       # Tailwind 4 @theme design tokens (ported from prototype)
-│   ├── layout.tsx        # Root layout
-│   └── page.tsx          # T1.1 foundation check (replaced in T2.1)
+├── src/
+│   ├── app/              # Next.js App Router — routes, layouts, route handlers
+│   │   ├── globals.css   # Tailwind 4 @theme design tokens (ported from prototype)
+│   │   ├── layout.tsx    # Root layout
+│   │   └── page.tsx      # T1.1 foundation check (replaced in T2.1)
+│   └── lib/
+│       ├── env/          # Zod-validated environment, split by trust boundary
+│       │   ├── public.ts # NEXT_PUBLIC_* — safe on both sides
+│       │   └── server.ts # secret key — `server-only`
+│       └── supabase/     # One client per trust level (see §7)
+│           ├── client.ts         # browser, publishable key, RLS enforced
+│           ├── server.ts         # server, publishable key, RLS enforced
+│           ├── admin.ts          # server, secret key, RLS BYPASSED
+│           └── database.types.ts # placeholder until T1.3 codegen
 ├── docs/                 # Living documentation (this directory)
 ├── v1Prototype/          # FROZEN static prototype — design reference, never edited
 ├── public/               # Static assets
@@ -77,18 +87,21 @@ ESLint and Prettier. It is a reference, not a build input.
 
 ## 3. Stack
 
-| Layer                     | Technology              | Version | Notes                                             |
-| ------------------------- | ----------------------- | ------- | ------------------------------------------------- |
-| Framework                 | Next.js (App Router)    | 16.3.4  | Turbopack is the default bundler                  |
-| UI runtime                | React                   | 19.2.8  | App Router pins its own React internally          |
-| Language                  | TypeScript              | 5.9.3   | `strict` + `noUncheckedIndexedAccess`             |
-| Styling                   | Tailwind CSS            | 4.3.3   | CSS-first `@theme`; **no `tailwind.config.js`**   |
-| Icons                     | lucide-react            | latest  |                                                   |
-| Lint                      | ESLint                  | 9.x     | Flat config; `eslint-config-prettier` last        |
-| Format                    | Prettier                | 3.x     | + `prettier-plugin-tailwindcss` for class sorting |
-| Database / Auth / Storage | Supabase Cloud          | PG 15+  | RLS, pgvector, Storage                            |
-| AI                        | Anthropic API           | —       | See §5                                            |
-| Hosting                   | Vercel + Supabase Cloud | —       |                                                   |
+| Layer                     | Technology              | Version | Notes                                                          |
+| ------------------------- | ----------------------- | ------- | -------------------------------------------------------------- |
+| Framework                 | Next.js (App Router)    | 16.3.4  | Turbopack is the default bundler                               |
+| UI runtime                | React                   | 19.2.8  | App Router pins its own React internally                       |
+| Language                  | TypeScript              | 5.9.3   | `strict` + `noUncheckedIndexedAccess`                          |
+| Styling                   | Tailwind CSS            | 4.3.3   | CSS-first `@theme`; **no `tailwind.config.js`**                |
+| Icons                     | lucide-react            | latest  |                                                                |
+| Lint                      | ESLint                  | 9.x     | Flat config; `eslint-config-prettier` last                     |
+| Format                    | Prettier                | 3.x     | + `prettier-plugin-tailwindcss` for class sorting              |
+| Database / Auth / Storage | Supabase Cloud          | PG 15+  | RLS, pgvector, Storage                                         |
+| Supabase SDK              | `@supabase/supabase-js` | 2.116.0 |                                                                |
+| Supabase SSR              | `@supabase/ssr`         | 0.12.7  | `getAll`/`setAll` cookie API                                   |
+| Validation                | Zod                     | 4.5.4   | `z.url()`, `z.prettifyError()` — Zod 4 API, differs from Zod 3 |
+| AI                        | Anthropic API           | —       | See §5                                                         |
+| Hosting                   | Vercel + Supabase Cloud | —       |                                                                |
 
 ---
 
@@ -148,26 +161,82 @@ inventing one would be a redesign, which CLAUDE.md §1.2 forbids.
 
 ---
 
-## 7. Data Model
+## 7. Supabase Client Topology
+
+Three clients exist, one per trust level. Choosing the wrong one is the most likely way
+to introduce a cross-tenant data leak, so the distinction is deliberate.
+
+| Module                       | Key         | Runs        | Acts as        | RLS          |
+| ---------------------------- | ----------- | ----------- | -------------- | ------------ |
+| `src/lib/supabase/client.ts` | publishable | browser     | signed-in user | **enforced** |
+| `src/lib/supabase/server.ts` | publishable | server      | signed-in user | **enforced** |
+| `src/lib/supabase/admin.ts`  | secret      | server only | service role   | **BYPASSED** |
+
+Default to the server client. `admin.ts` is for genuine cross-tenant work only —
+migrations, scheduled jobs, admin tooling — and every call site must filter by an
+`organization_id` derived from the session, never from client input.
+
+### Environment validation
+
+`src/lib/env/` splits the environment by trust boundary:
+
+- `public.ts` — validates `NEXT_PUBLIC_*` with Zod. Safe on both sides. Rejects a value
+  that does not start with `sb_publishable_`, which catches the one catastrophic mistake:
+  pasting the secret key into a `NEXT_PUBLIC_` variable would inline an RLS-bypassing
+  credential into every page of the app.
+- `server.ts` — validates the secret key. Begins with `import "server-only"`, so importing
+  it from a Client Component is a **build error**, not a runtime surprise. Verified during
+  T1.2 by deliberately importing `admin.ts` into a `"use client"` page: the build failed
+  with the full import chain.
+
+Both modules validate at import time and throw with a `z.prettifyError` message, so
+misconfiguration fails immediately and legibly rather than surfacing as a confusing 401.
+
+### API key format
+
+This project uses Supabase's current key format (`sb_publishable_` / `sb_secret_`), not the
+legacy JWT `anon` / `service_role` pair. One consequence to be aware of: publishable keys
+cannot introspect the REST schema root (`/rest/v1/`) — that now requires a secret key. This
+does not affect table queries.
+
+### Cookie handling
+
+`@supabase/ssr` requires `getAll`/`setAll`; the older `get`/`set`/`remove` triple is
+deprecated and misses edge cases that cause random logouts.
+
+`setAll` receives a **second `headers` argument** carrying
+`Cache-Control: private, no-cache, no-store, must-revalidate` and friends. These MUST be
+applied to any response that writes auth cookies — otherwise a CDN or reverse proxy can
+cache one user's session token and serve it to a different user. `proxy.ts` (T1.4) is
+responsible for applying them.
+
+The server client swallows the error `setAll` throws inside Server Components, which cannot
+mutate cookies. That is safe **only** because `proxy.ts` refreshes sessions per request. If
+that proxy is removed, sessions will silently expire early.
+
+## 8. Data Model
 
 > **Pending T1.3.** The ER diagram for `organizations`, `profiles` and the RBAC roles
 > (`bid_manager`, `pricing_specialist`, `executive_approver`) plus their RLS policies will
 > be added here as the first migration is written.
 
-## 8. Pipelines
+## 9. Pipelines
 
 > **Pending T4.3 / T5.2.** Mermaid sequence diagrams for PDF ingestion → Digital Twin
 > extraction, and for the compliance gap engine, will be added with those tasks.
 
 ---
 
-## 9. Decision Log
+## 10. Decision Log
 
-| #   | Decision                                                        | Rationale                                                                                                                                              |
-| --- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Next.js app at repo root, not a monorepo                        | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                               |
-| 2   | PDF extraction via Next.js Route Handlers, not a Python service | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate. |
-| 3   | Anthropic over OpenAI                                           | Listed first in CLAUDE.md §2; native PDF input plus structured output covers Phases 3–4 in one dependency.                                             |
-| 4   | System font stack, not Geist                                    | The prototype specifies Arial. A system stack is the faithful port and removes a build-time font fetch.                                                |
-| 5   | RLS as the tenancy enforcement point                            | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                           |
-| 6   | One git branch per task                                         | User's explicit choice; keeps `main` deployable and gives a review checkpoint per task.                                                                |
+| #   | Decision                                                             | Rationale                                                                                                                                               |
+| --- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Next.js app at repo root, not a monorepo                             | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                |
+| 2   | PDF extraction via Next.js Route Handlers, not a Python service      | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.  |
+| 3   | Anthropic over OpenAI                                                | Listed first in CLAUDE.md §2; native PDF input plus structured output covers Phases 3–4 in one dependency.                                              |
+| 4   | System font stack, not Geist                                         | The prototype specifies Arial. A system stack is the faithful port and removes a build-time font fetch.                                                 |
+| 5   | RLS as the tenancy enforcement point                                 | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                            |
+| 6   | One git branch per task                                              | User's explicit choice; keeps `main` deployable and gives a review checkpoint per task.                                                                 |
+| 7   | Three separate Supabase clients rather than one configurable factory | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site. |
+| 8   | Env validated with Zod at import time, split by trust boundary       | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                |
+| 9   | `Database` type is a committed placeholder until T1.3                | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.        |
