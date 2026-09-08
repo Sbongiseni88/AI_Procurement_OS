@@ -74,10 +74,14 @@ enforcement point; the service layer is convenience on top of it.
 │           ├── server.ts         # server, publishable key, RLS enforced
 │           ├── admin.ts          # server, secret key, RLS BYPASSED
 │           └── database.types.ts # placeholder until T1.3 codegen
+├── scripts/
+│   └── verify-rls.ts     # live tenant-isolation test (npm run verify:rls)
+├── supabase/
+│   ├── config.toml       # CLI config
+│   └── migrations/       # schema history; push with npm run db:push
 ├── docs/                 # Living documentation (this directory)
 ├── v1Prototype/          # FROZEN static prototype — design reference, never edited
-├── public/               # Static assets
-└── supabase/             # Migrations (from T1.3)
+└── public/               # Static assets
 ```
 
 `v1Prototype/index.html` is the source of truth for visual design and is excluded from
@@ -216,9 +220,112 @@ that proxy is removed, sessions will silently expire early.
 
 ## 8. Data Model
 
-> **Pending T1.3.** The ER diagram for `organizations`, `profiles` and the RBAC roles
-> (`bid_manager`, `pricing_specialist`, `executive_approver`) plus their RLS policies will
-> be added here as the first migration is written.
+Migration: `supabase/migrations/20260908133617_init_organizations_profiles_rbac.sql`.
+
+```mermaid
+erDiagram
+    AUTH_USERS ||--|| PROFILES : "id (FK, on delete cascade)"
+    ORGANIZATIONS ||--o{ PROFILES : "organization_id (FK, on delete restrict)"
+
+    AUTH_USERS {
+        uuid id PK "managed by Supabase Auth"
+        text email
+    }
+
+    ORGANIZATIONS {
+        uuid id PK "gen_random_uuid()"
+        text name "NOT NULL, non-blank"
+        text registration_number "nullable"
+        text vat_number "nullable"
+        text csd_supplier_number "nullable"
+        timestamptz created_at
+        timestamptz updated_at "trigger-maintained"
+    }
+
+    PROFILES {
+        uuid id PK-FK "= auth.users.id"
+        uuid organization_id FK "NOT NULL"
+        app_role role "NOT NULL, default bid_manager"
+        text full_name "nullable"
+        timestamptz created_at
+        timestamptz updated_at "trigger-maintained"
+    }
+```
+
+`organizations` is the tenant root. `profiles` is 1:1 with `auth.users` and binds each user to
+exactly one organization and one role. `app_role` is an enum:
+`bid_manager | pricing_specialist | executive_approver`.
+
+**`profiles.organization_id` is NOT NULL deliberately.** A nullable tenant key invites
+`organization_id = NULL` comparisons, which evaluate to NULL rather than false — a classic
+way for a policy to silently stop filtering.
+
+### RLS policy matrix
+
+RLS is enabled on both tables. `anon` is granted nothing.
+
+| Table           | SELECT        | INSERT     | UPDATE                                                                               | DELETE     |
+| --------------- | ------------- | ---------- | ------------------------------------------------------------------------------------ | ---------- |
+| `organizations` | own org only  | **denied** | own org, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied** |
+| `profiles`      | same org only | **denied** | own row only, and only `full_name`                                                   | **denied** |
+
+INSERT and DELETE are denied to all user roles on both tables. That is intentional:
+provisioning a profile is how a user would otherwise insert themselves into a rival's
+organization. Both are `service_role`-only.
+
+### Anti-escalation, in two layers
+
+The threat is a user promoting themselves to `executive_approver` and approving their own bid.
+
+1. **Column-level `GRANT` (primary).** `authenticated` holds `UPDATE (full_name)` on
+   `profiles` — `role` and `organization_id` are not grantable, so the attempt is rejected at
+   the privilege layer before RLS is even consulted.
+2. **`forbid_self_privilege_change` trigger (defence-in-depth).** Rejects any change to
+   `role` or `organization_id` unless `current_user` is `service_role`, `postgres` or
+   `supabase_admin`. This exists because a future migration running
+   `grant all on public.profiles to authenticated` would silently re-open layer 1.
+
+The trigger is **SECURITY INVOKER** on purpose. As `SECURITY DEFINER` its `current_user`
+would resolve to the function owner rather than the caller, so the privileged-role check
+would never match and legitimate administrative role changes would all be rejected.
+
+### Session helpers
+
+`public.current_organization_id()` and `public.current_user_role()` are `SECURITY DEFINER`
+because a policy on `profiles` that reads `profiles` recurses infinitely; running as the
+owner bypasses RLS on the lookup and breaks the cycle. Both carry `SET search_path = ''` —
+mandatory on any `SECURITY DEFINER` function, since otherwise a caller can prepend a schema
+and hijack an unqualified name into running their own code with the owner's privileges.
+Every identifier in those bodies is fully qualified as a result. `EXECUTE` is revoked from
+`PUBLIC` and granted only to `authenticated`.
+
+Both return NULL when the caller has no profile, so every policy **fails closed**.
+
+Policies wrap them as `(select fn())` rather than `fn()`, so Postgres evaluates them once per
+statement as an InitPlan instead of once per row.
+
+### Verification
+
+`npm run verify:rls` (`scripts/verify-rls.ts`) provisions two organizations with one user
+each and asserts tenant isolation over the wire, as those users, through PostgREST. 12/12
+passing as of T1.3, including the cases that must fail: self-promotion, self-transfer between
+organizations, organization creation, and cross-tenant read and rename.
+
+### Generated types
+
+`npm run db:types` regenerates `src/lib/supabase/database.types.ts` from the live schema.
+**Re-run it after every migration.** It is in `.prettierignore`, since reformatting a
+generated file just fights the generator.
+
+Verified as enforcing: unknown table names, column types, and enum values. **Not** enforced:
+unknown column names inside a `.select("...")` string — supabase-js's select-string parser is
+permissive about those, so a typo there fails at runtime, not compile time.
+
+### Not yet built
+
+There is **no path for a new signup to obtain an organization**, because INSERT is denied on
+both tables. T1.4 must supply a `SECURITY DEFINER` onboarding RPC that creates an
+organization and its first profile in one transaction.
 
 ## 9. Pipelines
 
@@ -240,3 +347,6 @@ that proxy is removed, sessions will silently expire early.
 | 7   | Three separate Supabase clients rather than one configurable factory | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site. |
 | 8   | Env validated with Zod at import time, split by trust boundary       | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                |
 | 9   | `Database` type is a committed placeholder until T1.3                | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.        |
+| 10  | `profiles.organization_id` NOT NULL                                  | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                         |
+| 11  | INSERT/DELETE denied to all user roles on both tables                | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                      |
+| 12  | Anti-escalation duplicated across column GRANTs and a trigger        | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                             |
