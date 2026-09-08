@@ -1,7 +1,7 @@
 # Task Board — AI Procurement OS V1 MVP
 
 **Legend:** `[TODO]` · `[IN PROGRESS]` · `[DONE]`
-**Working agreement:** one task at a time · one branch per task (`feat/tN.N-slug`) · typecheck + lint + build must pass before commit · check in with the user after every task.
+**Working agreement:** one task at a time · one branch per task (`feat/tN.N-slug`) · typecheck + lint + build must pass before commit · every new user journey ships with a Playwright E2E test (from T1.5) · check in with the user after every task.
 
 ---
 
@@ -10,7 +10,8 @@
 - `[DONE]` **T1.1** — Initialize Next.js TS project with Tailwind, ESLint, Prettier, Lucide. _(2026-09-08 10:07 SAST)_
 - `[TODO]` **T1.2** — Configure Supabase client (browser + server) and environment variables.
 - `[TODO]` **T1.3** — Define initial database migration: `organizations`, `profiles`, and RBAC with RLS.
-- `[TODO]` **T1.4** — Implement Auth flow (Login, Sign-up, Protected Route Middleware → **`proxy.ts`**, see ARCHITECTURE.md §4).
+- `[TODO]` **T1.5** — Playwright E2E harness: install `@playwright/test`, add `playwright.config.ts`, `tests/e2e/` and a `test:e2e` script. **Listed before T1.4 on purpose** — T1.4 ships the first real user journey, and no new journey may merge without E2E coverage, so the harness must exist first.
+- `[TODO]` **T1.4** — Implement Auth flow (Login, Sign-up, Protected Route Middleware → **`proxy.ts`**, see ARCHITECTURE.md §4). _Blocked by T1.5._
 
 ### Epic 2: UI Shell & Design System Port
 
