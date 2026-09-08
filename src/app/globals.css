@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/*
+ * AI Procurement OS — Design tokens.
+ *
+ * Ported verbatim from the V1 prototype (v1Prototype/index.html) per CLAUDE.md §1.2.
+ * Every hex value below is lifted from that file; do not invent new hues here.
+ * Status tokens are named for their COMPLIANCE MEANING (Phase 4 flags), not their
+ * colour, so components read as domain logic rather than decoration.
+ */
+@theme {
+  /* --- Surfaces & text --------------------------------------------------- */
+  --color-canvas: #f5f7fb; /* page background            */
+  --color-surface: #ffffff; /* cards, panels              */
+  --color-ink: #172033; /* primary body text          */
+  --color-ink-muted: #718096; /* labels, captions           */
+  --color-hairline: #e6ebf2; /* card / panel border        */
+  --color-rule: #edf0f5; /* table + panel-header rules */
+  --color-thead: #f8fafc; /* table header fill          */
+  --color-field: #d7dee8; /* input border               */
+
+  /* --- Command rail (fixed navy sidebar) --------------------------------- */
+  --color-rail: #111827;
+  --color-rail-ink: #dbe4f0;
+  --color-rail-ink-muted: #b9c5d6; /* idle nav item              */
+  --color-rail-ink-faint: #8da4c7; /* brand strapline            */
+  --color-rail-active: #243149; /* active / hover nav item    */
+
+  /* --- Compliance status pills ------------------------------------------- */
+  --color-status-found-bg: #e6f7ee; /* FOUND    / READY           */
+  --color-status-found-ink: #167346;
+  --color-status-verify-bg: #fff5d8; /* VERIFY   / IN PROGRESS     */
+  --color-status-verify-ink: #956a00;
+  --color-status-missing-bg: #fdeaea; /* MISSING  / INCOMPLETE      */
+  --color-status-missing-ink: #b42323;
+  --color-status-info-bg: #e8f0ff; /* NOT CLAIMED / neutral      */
+  --color-status-info-ink: #2559a6;
+
+  /* --- Readiness meters --------------------------------------------------- */
+  --color-meter-track: #e7ecf3;
+  --color-meter-fill: #2f6fb5;
+
+  /* --- Tender Copilot / AI brief panel ----------------------------------- */
+  --color-copilot-bg: #f0f6ff;
+  --color-copilot-border: #cfe0fa;
+
+  /* --- Inline banners ----------------------------------------------------- */
+  --color-alert-bg: #fff5f5;
+  --color-alert-edge: #c53030;
+  --color-success-bg: #f0fff7;
+  --color-success-edge: #14804a;
+
+  /* --- Primary action ----------------------------------------------------- */
+  --color-action: #1f4d8f;
+
+  /* --- Layout ------------------------------------------------------------- */
+  --spacing-rail: 235px; /* sidebar width; drives the main-content offset */
+
+  /* --- Typography & elevation -------------------------------------------- */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --shadow-panel: 0 2px 8px rgb(16 32 64 / 0.03);
+}
+
+/*
+ * The prototype is a light-only interface. No dark palette is defined here:
+ * inventing one would be a redesign, which CLAUDE.md §1.2 forbids.
+ */
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}

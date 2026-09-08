@@ -1,0 +1,18 @@
+# Build output & dependencies
+.next/
+out/
+build/
+node_modules/
+next-env.d.ts
+*.tsbuildinfo
+
+# Lockfiles
+package-lock.json
+
+# The untouched V1 prototype is a frozen design reference — do not reformat it.
+v1Prototype/
+
+# Agent / project instruction files — human-maintained prose, keep Prettier out.
+CLAUDE.md
+AGENTS.md
+.claude/
