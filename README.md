@@ -19,7 +19,15 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-Environment configuration arrives with T1.2.
+### Environment
+
+```bash
+cp .env.local.example .env.local
+```
+
+Fill in the values from your Supabase dashboard (Project Settings → API Keys).
+`.env.local` is gitignored and must stay that way — `SUPABASE_SECRET_KEY` bypasses Row
+Level Security entirely.
 
 ## Scripts
 
