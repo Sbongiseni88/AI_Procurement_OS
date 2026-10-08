@@ -1,5 +1,5 @@
 /**
- * RLS verification (T1.3, extended per ticket: E1.4 onboarding).
+ * RLS verification (T1.3, extended per ticket: E1.4 onboarding, E1.5 audit log).
  *
  * `tsc` cannot test SQL, so tenant isolation has to be proven against a real
  * database. This script provisions two organizations with one user each, then
@@ -37,6 +37,8 @@ const PASSWORD = `Test-${RUN}-Aa1!`;
 
 let checks = 0;
 let failures = 0;
+/** Teardown problems: not an isolation failure, but the run must still not pass. */
+let cleanupFailures = 0;
 
 function check(label: string, passed: boolean, detail?: string): void {
   checks += 1;
@@ -315,6 +317,94 @@ async function main(): Promise<void> {
       `schema('private'): ${dPrivate.error?.code ?? "ok"}; direct: HTTP ${dDirect.status}`,
     );
 
+    // ---- Audit log (E1.5) ---------------------------------------------------
+    console.log("\nAudit log — audit_events:");
+    const seeded = await admin
+      .from("audit_events")
+      .insert([
+        {
+          organization_id: orgA.id,
+          actor_id: userA,
+          action: "workspace.created",
+          entity_type: "organization",
+          entity_id: orgA.id,
+        },
+        {
+          organization_id: orgB.id,
+          action: "workspace.created",
+          entity_type: "organization",
+          entity_id: orgB.id,
+        },
+      ])
+      .select("id, organization_id");
+    if (seeded.error) throw new Error(`audit seed failed: ${seeded.error.message}`);
+    const eventA = seeded.data.find((e) => e.organization_id === orgA.id)?.id;
+    const eventB = seeded.data.find((e) => e.organization_id === orgB.id)?.id;
+    if (eventA === undefined || eventB === undefined) throw new Error("audit seed incomplete");
+
+    const aEvents = await a.from("audit_events").select("id, organization_id");
+    check(
+      "a member reads its own organization's events only",
+      !aEvents.error &&
+        aEvents.data.some((e) => e.id === eventA) &&
+        aEvents.data.every((e) => e.organization_id === orgA.id),
+      aEvents.error?.message ?? `got ${aEvents.data?.length} rows`,
+    );
+
+    const aReadsB = await a.from("audit_events").select("id").eq("id", eventB);
+    check(
+      "a member CANNOT read another company's events",
+      !aReadsB.error && aReadsB.data.length === 0,
+      aReadsB.error?.message ?? `got ${aReadsB.data?.length} rows`,
+    );
+
+    const aInsert = await a.from("audit_events").insert({
+      organization_id: orgA.id,
+      actor_id: userA,
+      action: "workspace.created",
+      entity_type: "organization",
+    });
+    check(
+      "a member CANNOT write an event directly (no forged entries)",
+      aInsert.error !== null,
+      aInsert.error ? `blocked: ${aInsert.error.code}` : "INSERT SUCCEEDED — CRITICAL",
+    );
+
+    const aUpdate = await a
+      .from("audit_events")
+      .update({ action: "workspace.renamed" })
+      .eq("id", eventA)
+      .select("id");
+    const aDelete = await a.from("audit_events").delete().eq("id", eventA).select("id");
+    check(
+      "a member CANNOT update or delete its own organization's events",
+      (aUpdate.error !== null || aUpdate.data?.length === 0) &&
+        (aDelete.error !== null || aDelete.data?.length === 0),
+      `update: ${aUpdate.error?.code ?? aUpdate.data?.length}; delete: ${aDelete.error?.code ?? aDelete.data?.length}`,
+    );
+
+    const svcUpdate = await admin
+      .from("audit_events")
+      .update({ action: "workspace.renamed" })
+      .eq("id", eventA)
+      .select("id");
+    const svcDelete = await admin.from("audit_events").delete().eq("id", eventA).select("id");
+    const stillThere = await admin.from("audit_events").select("action").eq("id", eventA).single();
+    check(
+      "even the service role CANNOT update or delete an event",
+      svcUpdate.error !== null &&
+        svcDelete.error !== null &&
+        stillThere.data?.action === "workspace.created",
+      `update: ${svcUpdate.error?.code ?? "ALLOWED"}; delete: ${svcDelete.error?.code ?? "ALLOWED"}`,
+    );
+
+    const cEvents = await c.from("audit_events").select("id");
+    check(
+      "a member of a third company sees none of these events",
+      !cEvents.error && !cEvents.data.some((e) => e.id === eventA || e.id === eventB),
+      cEvents.error?.message ?? `got ${cEvents.data?.length} rows`,
+    );
+
     // ---- Anonymous access ---------------------------------------------------
     console.log("\nAnonymous (no session):");
     const anon = createClient(URL, PUBLISHABLE, {
@@ -335,6 +425,14 @@ async function main(): Promise<void> {
       anonOnboard.error !== null && (await orgsNamed(`Anon ${RUN}`)) === 0,
       anonOnboard.error ? `blocked: ${anonOnboard.error.code}` : "ANON WORKSPACE CREATED",
     );
+    const anonEvents = await anon.from("audit_events").select("id");
+    check(
+      "anonymous callers see no audit events",
+      anonEvents.error !== null || anonEvents.data?.length === 0,
+      anonEvents.error
+        ? `blocked: ${anonEvents.error.code}`
+        : `got ${anonEvents.data?.length} rows`,
+    );
     const anonProfiles = await anon.from("profiles").select("id");
     check(
       "anonymous callers see no profiles",
@@ -348,6 +446,7 @@ async function main(): Promise<void> {
     console.log("\nTeardown:");
     for (const id of created.userIds) {
       const { error } = await admin.auth.admin.deleteUser(id);
+      if (error) cleanupFailures += 1;
       console.log(
         `  user ${id.slice(0, 8)} ${error ? `NOT deleted: ${error.message}` : "deleted"}`,
       );
@@ -359,7 +458,9 @@ async function main(): Promise<void> {
       if (!created.orgIds.includes(row.id)) created.orgIds.push(row.id);
     }
     for (const id of created.orgIds) {
+      // Their audit events cascade with them (the one deletion audit_events allows).
       const { error } = await admin.from("organizations").delete().eq("id", id);
+      if (error) cleanupFailures += 1;
       console.log(
         `  org  ${id.slice(0, 8)} ${error ? `NOT deleted: ${error.message}` : "deleted"}`,
       );
@@ -369,6 +470,10 @@ async function main(): Promise<void> {
   console.log(`\n${checks - failures}/${checks} checks passed.`);
   if (failures > 0) {
     console.error(`${failures} FAILED — tenant isolation is not intact.`);
+    process.exit(1);
+  }
+  if (cleanupFailures > 0) {
+    console.error(`${cleanupFailures} fixture(s) NOT cleaned up — see Teardown above.`);
     process.exit(1);
   }
   console.log("Tenant isolation verified.");

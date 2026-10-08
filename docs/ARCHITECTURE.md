@@ -262,11 +262,13 @@ Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 | `20260908133617_init_organizations_profiles_rbac`   | T1.3   | `organizations`, `profiles`, `app_role`, RLS, anti-escalation       |
 | `20261008132310_onboarding_create_workspace`        | E1.4   | `private` schema, `private.create_workspace`, `complete_onboarding` |
 | `20261008132832_onboarding_reject_whitespace_names` | E1.4   | names must contain visible text (tabs/newlines no longer pass)      |
+| `20261008133132_audit_events`                       | E1.5   | append-only `audit_events`, read own org only                       |
 
 ```mermaid
 erDiagram
     AUTH_USERS ||--|| PROFILES : "id (FK, on delete cascade)"
     ORGANIZATIONS ||--o{ PROFILES : "organization_id (FK, on delete restrict)"
+    ORGANIZATIONS ||--o{ AUDIT_EVENTS : "organization_id (FK, on delete cascade)"
 
     AUTH_USERS {
         uuid id PK "managed by Supabase Auth"
@@ -291,6 +293,17 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at "trigger-maintained"
     }
+
+    AUDIT_EVENTS {
+        bigint id PK "identity"
+        uuid organization_id FK "NOT NULL"
+        uuid actor_id "nullable, no FK (history survives user deletion)"
+        text action "entity.verb, e.g. workspace.created"
+        text entity_type "NOT NULL"
+        uuid entity_id "nullable"
+        jsonb details "object, default {}"
+        timestamptz created_at
+    }
 ```
 
 `organizations` is the tenant root. `profiles` is 1:1 with `auth.users` and binds each user to
@@ -303,12 +316,13 @@ way for a policy to silently stop filtering.
 
 ### RLS policy matrix
 
-RLS is enabled on both tables. `anon` is granted nothing.
+RLS is enabled on every table. `anon` is granted nothing.
 
-| Table           | SELECT        | INSERT     | UPDATE                                                                               | DELETE     |
-| --------------- | ------------- | ---------- | ------------------------------------------------------------------------------------ | ---------- |
-| `organizations` | own org only  | **denied** | own org, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied** |
-| `profiles`      | same org only | **denied** | own row only, and only `full_name`                                                   | **denied** |
+| Table           | SELECT        | INSERT                                         | UPDATE                                                                               | DELETE                                                       |
+| --------------- | ------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `organizations` | own org only  | **denied**                                     | own org, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied**                                                   |
+| `profiles`      | same org only | **denied**                                     | own row only, and only `full_name`                                                   | **denied**                                                   |
+| `audit_events`  | own org only  | **denied** (service role via the audit helper) | **denied to everyone**                                                               | **denied to everyone** (only cascades with its organization) |
 
 INSERT and DELETE are denied to all user roles on both tables. That is intentional:
 provisioning a profile is how a user would otherwise insert themselves into a rival's
@@ -365,14 +379,40 @@ the caller and can never attach anyone to an existing company. Both inserts happ
 function call, so a failure leaves neither behind. The first member is `executive_approver`
 (the company's owner); later members arrive by invitation, which is not in Phase 1.
 
+### Audit log (E1.5)
+
+`audit_events` records who did what, to which record, in which company. It is append-only
+at three layers:
+
+1. **Privileges.** Users hold `SELECT` only. `service_role` holds `SELECT, INSERT`. Nobody
+   holds `UPDATE`, `DELETE` or `TRUNCATE`.
+2. **Trigger** (`private.forbid_audit_event_changes`). Raises on any update, delete or
+   truncate, even by the table owner, except a delete that arrives through the
+   organization's `ON DELETE CASCADE` (`pg_trigger_depth() > 1`): a company's history goes
+   with the company, never row by row.
+3. **RLS.** Members read their own organization's events only.
+
+Rows are written by one helper, `recordAuditEvent` in `src/lib/audit/record.ts`, with the
+service role. Users get no INSERT privilege because they could otherwise forge entries in
+their own company's log through the API. The helper accepts only the action, entity id and
+details. The organization comes from the caller's own membership (read through RLS), and
+the actor comes from the verified JWT. Details never contain ID numbers, bank details or
+document contents.
+
+Logged so far: `workspace.created` (onboarding). Trade-off: the workspace and its event are
+two writes, not one transaction, so a database failure between them loses that one event
+(logged to the server log). If that ever matters, move the insert into
+`private.create_workspace`.
+
 ### Verification
 
 `npm run verify:rls` (`scripts/verify-rls.ts`) provisions organizations and users and asserts
-tenant isolation over the wire, as those users, through PostgREST. **20/20** as of E1.4.
+tenant isolation over the wire, as those users, through PostgREST. **27/27** as of E1.5.
 Cases that must fail: self-promotion, self-transfer between organizations, organization
 creation, cross-tenant read and rename; onboarding twice, a second workspace, joining
 another company, blank or whitespace-only names, anonymous onboarding, and calling
-`private.create_workspace` through the API. The run deletes everything it created,
+`private.create_workspace` through the API; reading another company's audit events, writing
+an event directly, and updating or deleting one (even as the service role). The run deletes everything it created,
 sweeping by its run suffix so even a wrongly created organization is removed.
 
 ### Generated types
@@ -388,7 +428,7 @@ permissive about those, so a typo there fails at runtime, not compile time.
 ### Not yet built
 
 Planned tables, each added with RLS and `verify:rls` coverage in its ticket:
-`audit_events` (E1.5) · `company_documents`, `ai_runs` and validity settings on
+`company_documents`, `ai_runs` and validity settings on
 `organizations` (E2.1) · `tenders`, `tender_documents`, `tender_requirements` (E3.1).
 Compliance results are computed on read in Phase 1, so there is no results table.
 
@@ -434,3 +474,5 @@ Phase 1; the booklet's larger role set is a later-phase decision.
 | 21  | Password reset only from a fresh email-link session                    | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                         |
 | 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public` | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.              |
 | 23  | Workspace creator becomes `executive_approver`                         | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                        |
+| 24  | Audit events written by the service role through one helper            | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                        |
+| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade  | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                        |

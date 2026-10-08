@@ -30,6 +30,20 @@ test("sign up, confirm the email, set up the workspace, land in it", async ({ pa
     await expect(page.getByRole("heading", { level: 1, name: company })).toBeVisible();
     await expect(page.getByText("Executive approver")).toBeVisible();
 
+    // Onboarding is audit-logged (E1.5): one event, by this person, for this company.
+    const { data: events } = await adminClient()
+      .from("audit_events")
+      .select("action, entity_type, entity_id, organization_id, details")
+      .eq("actor_id", userId ?? "");
+    expect(events).toHaveLength(1);
+    const [event] = events ?? [];
+    expect(event).toMatchObject({
+      action: "workspace.created",
+      entity_type: "organization",
+      details: { organizationName: company, role: "executive_approver" },
+    });
+    expect(event?.entity_id).toBe(event?.organization_id);
+
     // Onboarding is done once: going back to it returns to the workspace.
     await page.goto("/onboarding");
     await expect(page).toHaveURL(/\/$/);

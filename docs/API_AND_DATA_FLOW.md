@@ -1,7 +1,7 @@
 # API & Data Flow — AI Procurement OS, Phase 1
 
-> **Status:** Auth (E1.3) and onboarding (E1.4) are built. Entries are added by the ticket
-> that builds them (audit log E1.5, uploads E2.2, AI reading E2.4 and E3.3).
+> **Status:** Auth (E1.3), onboarding (E1.4) and the audit helper (E1.5) are built. Entries
+> are added by the ticket that builds them (uploads E2.2, AI reading E2.4 and E3.3).
 
 ## Conventions
 
@@ -18,8 +18,11 @@ These rules apply to every entry added below.
 5. **AI output is a proposal, not a fact.** Extracted values are saved with source page,
    quote and confidence as _pending review_; only values a person confirms feed the expiry
    and compliance checks. AI never sets a compliance status.
-6. **Every write that matters is audit-logged** through the single audit helper (E1.5):
-   uploads, confirmations, corrections, overrides (with reason).
+6. **Every write that matters is audit-logged** through the single audit helper,
+   `recordAuditEvent({ action, entityId, details })` in `src/lib/audit/record.ts`:
+   uploads, confirmations, corrections, overrides (with reason). Add each new action name
+   to `AUDIT_ACTION_NAMES` there. The helper sets organization and actor itself; never pass
+   them in. Logged so far: `workspace.created` (details: `organizationName`, `role`).
 
 ## Client Selection
 

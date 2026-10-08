@@ -39,6 +39,47 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_events: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string
+          details: Json
+          entity_id: string | null
+          entity_type: string
+          id: number
+          organization_id: string
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string
+          details?: Json
+          entity_id?: string | null
+          entity_type: string
+          id?: never
+          organization_id: string
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string
+          details?: Json
+          entity_id?: string | null
+          entity_type?: string
+          id?: never
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
