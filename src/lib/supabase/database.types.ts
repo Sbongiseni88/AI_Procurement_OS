@@ -80,6 +80,54 @@ export type Database = {
           },
         ]
       }
+      memberships: {
+        Row: {
+          created_at: string
+          id: string
+          invited_by: string | null
+          organization_id: string
+          role: Database["public"]["Enums"]["app_role"]
+          status: Database["public"]["Enums"]["membership_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invited_by?: string | null
+          organization_id: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["membership_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invited_by?: string | null
+          organization_id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: Database["public"]["Enums"]["membership_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memberships_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memberships_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
@@ -112,6 +160,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          active_organization_id: string | null
           created_at: string
           full_name: string | null
           id: string
@@ -120,6 +169,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          active_organization_id?: string | null
           created_at?: string
           full_name?: string | null
           id: string
@@ -128,6 +178,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          active_organization_id?: string | null
           created_at?: string
           full_name?: string | null
           id?: string
@@ -136,6 +187,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "profiles_active_organization_id_fkey"
+            columns: ["active_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "profiles_organization_id_fkey"
             columns: ["organization_id"]
@@ -162,6 +220,7 @@ export type Database = {
     }
     Enums: {
       app_role: "bid_manager" | "pricing_specialist" | "executive_approver"
+      membership_status: "invited" | "active" | "removed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -293,6 +352,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["bid_manager", "pricing_specialist", "executive_approver"],
+      membership_status: ["invited", "active", "removed"],
     },
   },
 } as const

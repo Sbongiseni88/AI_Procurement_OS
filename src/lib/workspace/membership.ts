@@ -33,7 +33,8 @@ export const getMembership = cache(async (): Promise<Membership | null> => {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("role, full_name, organization:organizations (id, name)")
+    // Named: profiles has two foreign keys to organizations since E1.5.2.
+    .select("role, full_name, organization:organizations!profiles_organization_id_fkey (id, name)")
     .eq("id", user.id)
     .maybeSingle();
   if (error) throw new Error(`Could not load your workspace: ${error.message}`);

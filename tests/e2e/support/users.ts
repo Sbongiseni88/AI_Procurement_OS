@@ -51,7 +51,7 @@ export async function deleteUser(id: string): Promise<void> {
 
 export type TestMember = TestUser & { organizationId: string; organizationName: string };
 
-/** A confirmed user who already has a workspace (organization + profile). */
+/** A confirmed user who already has a workspace (organization, profile, active membership). */
 export async function createMember(label = "member"): Promise<TestMember> {
   const admin = adminClient();
   const organizationName = `E2E Company ${randomUUID().slice(0, 8)}`;
@@ -66,26 +66,35 @@ export async function createMember(label = "member"): Promise<TestMember> {
     organization_id: organizationId,
     role: "bid_manager",
     full_name: "E2E Member",
+    active_organization_id: organizationId,
   });
-  if (profile.error) {
+  const membership = profile.error
+    ? null
+    : await admin
+        .from("memberships")
+        .insert({ organization_id: organizationId, user_id: user.id, role: "bid_manager" });
+  const error = profile.error ?? membership?.error;
+  if (error) {
     await deleteUser(user.id);
     await deleteOrganization(organizationId);
-    throw new Error(`profile insert failed: ${profile.error.message}`);
+    throw new Error(`member setup failed: ${error.message}`);
   }
   return { ...user, organizationId, organizationName };
 }
 
-/** Deletes a user and the organization their profile belonged to, if any. */
+/** Deletes a user and every organization they were a member of. */
 export async function deleteUserAndWorkspace(userId: string): Promise<void> {
   const admin = adminClient();
-  const profile = await admin
-    .from("profiles")
+  const memberships = await admin
+    .from("memberships")
     .select("organization_id")
-    .eq("id", userId)
-    .maybeSingle();
+    .eq("user_id", userId);
+  if (memberships.error) throw new Error(`membership lookup failed: ${memberships.error.message}`);
   await deleteUser(userId);
-  const organizationId: unknown = profile.data?.organization_id;
-  if (typeof organizationId === "string") await deleteOrganization(organizationId);
+  for (const row of memberships.data) {
+    const organizationId: unknown = row.organization_id;
+    if (typeof organizationId === "string") await deleteOrganization(organizationId);
+  }
 }
 
 export async function deleteOrganization(id: string): Promise<void> {
