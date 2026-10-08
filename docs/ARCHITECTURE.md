@@ -72,11 +72,12 @@ pgvector is not used in Phase 1.
 │   │   ├── auth/callback/ # landing route for auth email links
 │   │   ├── globals.css   # Tailwind 4 @theme design + status tokens (§6)
 │   │   ├── layout.tsx    # Root layout
-│   ├── components/       # shell/ (AppShell, nav, user menu), ui/ (StatusPill), forms/, auth/, workspace/
+│   ├── components/       # shell/, ui/ (StatusPill), forms/, auth/, workspace/, dashboard/, tenders/
 │   └── lib/
 │       ├── audit/        # recordAuditEvent — the one audit write path
 │       ├── auth/         # Server Actions, Zod schemas, session helpers, path rules
 │       ├── compliance/   # status set (statuses.ts); engines arrive in E2.5/E4.1
+│       ├── tenders/      # tender stages (board columns; E3.1 enum)
 │       ├── workspace/    # membership (profile + organization), onboarding action
 │       ├── env/          # Zod-validated environment, split by trust boundary
 │       │   ├── public.ts # NEXT_PUBLIC_* — safe on both sides
@@ -247,6 +248,12 @@ AI-generated look; the warm grey canvas is a deliberate step away from it.
   links inside them close their popover on click. `SidebarNav` and `PopoverLink` are the
   only client components. Skip link to `#main`. `PageHeader` is the title row of every
   page.
+- Dashboard and tender board (E1.8): real empty states only — a getting-started list whose
+  first step (workspace created) is genuinely done, empty "closing in 7 days" and
+  "expiring in 30 days" panels, and a legend of the seven statuses. The board has one
+  column per stage from `src/lib/tenders/stages.ts` (`reading`, `review`, `checking`,
+  `checked`), which E3.1's stage enum must reuse. "Upload a tender" is shown disabled with
+  an explanation until E3.2.
 
 ## 7. Supabase Client Topology
 
