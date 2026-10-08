@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     template: "%s · AI Procurement OS",
   },
   description:
-    "South African tender compliance and bid preparation intelligence. Digital twin ingestion, compliance gap analysis, BOQ pricing and human-approved submission packs.",
+    "Tender compliance checker for South African bidders. Reads tenders and company documents, flags expired documents and stale certified copies, and lists every compliance gap.",
 };
 
 /*

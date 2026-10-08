@@ -28,8 +28,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Frozen design reference, not application source.
-    "v1Prototype/**",
   ]),
 ]);
 

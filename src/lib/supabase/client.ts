@@ -12,7 +12,7 @@ import type { Database } from "./database.types";
  * Authenticated as the signed-in user (or anonymous), so every query is subject to
  * Row Level Security. Cookie handling is deliberately left to the library default,
  * which reads and writes `document.cookie` — that is the same cookie store the
- * server client and `proxy.ts` (T1.4) read, which is what keeps a session coherent
+ * server client and `proxy.ts` (E1.3) read, which is what keeps a session coherent
  * across the server/client boundary.
  *
  * `createBrowserClient` is internally a singleton, so calling this per component is

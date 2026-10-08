@@ -39,7 +39,7 @@ export async function createSupabaseServerClient() {
             }
           } catch {
             // Server Components cannot mutate cookies — Next.js throws here by
-            // design. This is safe to swallow ONLY because `proxy.ts` (T1.4)
+            // design. This is safe to swallow ONLY because `proxy.ts` (E1.3)
             // refreshes the session on every request and writes the refreshed
             // cookies to the response, including the required no-store cache
             // headers. If that proxy is ever removed, sessions will silently

@@ -1,7 +1,7 @@
-# API & Data Flow — AI Procurement OS V1 MVP
+# API & Data Flow — AI Procurement OS, Phase 1
 
-> **Status:** No endpoints exist yet. The foundation (T1.1) is in place; this document is
-> populated from T1.2 onward as Server Actions, Route Handlers and AI payloads are built.
+> **Status:** No endpoints exist yet. Entries are added by the ticket that builds them
+> (auth and onboarding from E1.3, uploads from E2.2, AI reading from E2.4 and E3.3).
 
 ## Conventions
 
@@ -15,9 +15,11 @@ These rules apply to every entry added below.
    return domain types.
 4. **Tenancy is never a query parameter.** `organization_id` is derived server-side from the
    session and enforced by RLS. A client-supplied tenant id is treated as an attack.
-5. **AI output is a proposal, not a fact.** Extraction and matching results are persisted
-   with provenance and a `VERIFY` posture where confidence is not absolute. Human approval
-   is mandatory before pack generation (T7.4).
+5. **AI output is a proposal, not a fact.** Extracted values are saved with source page,
+   quote and confidence as _pending review_; only values a person confirms feed the expiry
+   and compliance checks. AI never sets a compliance status.
+6. **Every write that matters is audit-logged** through the single audit helper (E1.5):
+   uploads, confirmations, corrections, overrides (with reason).
 
 ## Client Selection
 
@@ -37,9 +39,16 @@ Before adding an entry below, pick the right Supabase client (see ARCHITECTURE.m
 
 ## AI Payload Contracts
 
-| Pipeline                        | Model           | Input                            | Output schema             | Task |
-| ------------------------------- | --------------- | -------------------------------- | ------------------------- | ---- |
-| Tender Digital Twin extraction  | Claude Opus 5   | Tender PDF                       | `TenderDigitalTwinSchema` | T4.3 |
-| Compliance requirement matching | Claude Sonnet 5 | Requirements + Company DNA index | `ComplianceMatchSchema`   | T5.2 |
+All calls go through the AI gateway (`src/lib/ai/`, E2.3), which validates output with Zod
+and writes an `ai_runs` row (model, tokens, cost, latency, outcome).
 
-Both schemas are defined when their task is implemented.
+| Pipeline                 | Model             | Input                     | Output schema (defined in ticket)                                                                                                                                         | Ticket |
+| ------------------------ | ----------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Company document reading | `claude-opus-5-5` | One PDF or image          | `CompanyDocumentReadingSchema`: type, issuer, entity name, registration no., address, issue/expiry dates, certification stamps (date, office, page), confidence per field | E2.4   |
+| Tender reading           | `claude-opus-5-5` | Tender or RFQ PDF         | `TenderReadingSchema`: reference, issuer, closing and briefing dates, scoring system, returnable documents with mandatory flag, validity rules, page + quote per item     | E3.3   |
+| Requirement mapping hint | `claude-opus-5-5` | One unmatched requirement | `CategorySuggestionSchema`: suggested document category + confidence (used only when the lookup table has no match)                                                       | E3.4   |
+
+Not AI: expiry status (E2.5), compliance matching (E4.1) and cross-document conflict checks
+(E4.2) are deterministic functions with unit tests.
+
+Every schema returns an explicit "not found" rather than a guessed value.
