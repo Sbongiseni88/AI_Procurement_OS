@@ -68,11 +68,11 @@ pgvector is not used in Phase 1.
 │   ├── proxy.ts          # session refresh + route guard (Next 16's middleware)
 │   ├── app/              # Next.js App Router — routes, layouts, route handlers
 │   │   ├── (auth)/       # /login, /signup, /forgot-password, /reset-password, /onboarding
+│   │   ├── (app)/        # workspace: / (dashboard), /tenders, /documents, /settings
 │   │   ├── auth/callback/ # landing route for auth email links
 │   │   ├── globals.css   # Tailwind 4 @theme design + status tokens (§6)
 │   │   ├── layout.tsx    # Root layout
-│   │   └── page.tsx      # Signed-in placeholder (replaced by app shell in E1.7/E1.8)
-│   ├── components/       # ui/ (StatusPill), forms/ (Field, SubmitButton…), auth/, workspace/
+│   ├── components/       # shell/ (AppShell, nav, user menu), ui/ (StatusPill), forms/, auth/, workspace/
 │   └── lib/
 │       ├── audit/        # recordAuditEvent — the one audit write path
 │       ├── auth/         # Server Actions, Zod schemas, session helpers, path rules
@@ -240,6 +240,13 @@ AI-generated look; the warm grey canvas is a deliberate step away from it.
 - `StatusPill` (`src/components/ui/status-pill.tsx`): `<StatusPill status="expired" />`.
   The status list and labels live in `src/lib/compliance/statuses.ts`, so E2.5's expiry
   engine and E4.1's matching engine return the same values the pill renders.
+- App shell (E1.7, `src/components/shell/`): `(app)/layout.tsx` calls `requireMembership()`
+  once for every workspace page, then renders `AppShell`. Sidebar from 1024 px; below that
+  a header menu button opens the same `SidebarNav` as a drawer. The drawer and the account
+  menu are native `popover` elements (Esc and outside-click close them, no client JS);
+  links inside them close their popover on click. `SidebarNav` and `PopoverLink` are the
+  only client components. Skip link to `#main`. `PageHeader` is the title row of every
+  page.
 
 ## 7. Supabase Client Topology
 

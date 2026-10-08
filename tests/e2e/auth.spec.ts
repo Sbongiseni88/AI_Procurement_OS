@@ -1,6 +1,6 @@
 import { type Page } from "@playwright/test";
 
-import { expect, logInViaForm, test } from "./support/fixtures";
+import { expect, logInViaForm, logOutViaMenu, test } from "./support/fixtures";
 import { adminClient, testEmail, testPassword } from "./support/users";
 
 /**
@@ -71,10 +71,9 @@ test.describe("with an account", () => {
 
     await logInViaForm(page, member);
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByText(member.email)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Log out" }).click();
-    await expect(page).toHaveURL(/\/login$/);
+    await logOutViaMenu(page);
 
     await page.goto("/");
     await expect(page).toHaveURL(/\/login$/);
@@ -149,9 +148,8 @@ test.describe("with an account", () => {
     await page.getByRole("button", { name: "Save new password" }).click();
     await expect(page).toHaveURL(/\/$/);
 
-    await page.getByRole("button", { name: "Log out" }).click();
-    await expect(page).toHaveURL(/\/login$/);
+    await logOutViaMenu(page);
     await logInViaForm(page, { email: member.email, password: newPassword });
-    await expect(page.getByText(member.email)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
   });
 });

@@ -43,3 +43,10 @@ export async function logInViaForm(page: Page, user: Pick<TestUser, "email" | "p
   await page.getByLabel("Password").fill(user.password);
   await page.getByRole("button", { name: "Log in" }).click();
 }
+
+/** Opens the account menu in the header and logs out, then waits for the log-in page. */
+export async function logOutViaMenu(page: Page) {
+  await page.getByRole("button", { name: /account menu/ }).click();
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+}

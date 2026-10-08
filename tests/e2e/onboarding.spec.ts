@@ -27,8 +27,9 @@ test("sign up, confirm the email, set up the workspace, land in it", async ({ pa
     await page.getByRole("button", { name: "Create workspace" }).click();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: company })).toBeVisible();
-    await expect(page.getByText("Executive approver")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
+    await page.getByRole("button", { name: /account menu/ }).click();
+    await expect(page.getByText(`Executive approver at ${company}`)).toBeVisible();
 
     // Onboarding is audit-logged (E1.5): one event, by this person, for this company.
     const { data: events } = await adminClient()
@@ -74,9 +75,7 @@ test("onboarding asks for both names before creating anything", async ({ page, n
 
 test("a member who has a workspace skips onboarding", async ({ page, member }) => {
   await logInViaForm(page, member);
-  await expect(
-    page.getByRole("heading", { level: 1, name: member.organizationName }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
   await page.goto("/onboarding");
   await expect(page).toHaveURL(/\/$/);
 });
