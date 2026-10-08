@@ -58,11 +58,92 @@
 - `[DONE]` **E1.6** — Design pass: write a short design plan (frontend-design), then define the token set in `globals.css` (the old prototype palette is already removed; only a neutral base remains). Status tokens for the Phase 1 set: compliant, expiring, expired, missing, conflict, needs verification, unable to verify. One `StatusPill` component. Update ARCHITECTURE.md §6. _(2026-10-08 15:41 SAST)_
 - `[DONE]` **E1.7** — App shell: sidebar (Dashboard, Tenders, Company documents, Settings), header with company and user menu, responsive to phone width. _(2026-10-08 15:47 SAST)_
 - `[DONE]` **E1.8** — Dashboard and tender board layout with real empty states (no fake numbers): "No tenders yet — upload your first tender" etc. Board columns follow the tender stages planned in E3. _(2026-10-08 15:51 SAST)_
-- `[TODO]` **E1.9** — Deploy check: the GitHub repo is already linked to Vercel, so pushes to `main` deploy. Confirm the Vercel env vars are set, add the Vercel URL to Supabase auth Site URL / redirect URLs, smoke test sign-up and log-in on the live URL, then hand the link to the user to send. Update ARCHITECTURE.md §5 to current models (Claude Opus 5.5 for reading; matching in E4 is deterministic code, not AI).
+- `[TODO]` **E1.9** — Deploy check: the GitHub repo is already linked to Vercel, so pushes to `main` deploy. Confirm the Vercel env vars are set, add the Vercel URL to Supabase auth Site URL / redirect URLs, smoke test sign-up and log-in on the live URL, then hand the link to the user to send. Update ARCHITECTURE.md §5 to current models (Claude Opus 5.5 for reading; matching in E4 is deterministic code, not AI). **Blocked on you (see Handoff notes, steps 1–4):** Vercel has no `NEXT_PUBLIC_*` env vars, so every deploy since E1.3 fails and the live site still serves the E1.2 placeholder; the Supabase auth URLs are dashboard-only. Done in this session: smoke test `tests/e2e/smoke.spec.ts` (passes locally against `next start`), ARCHITECTURE §5 updated, live run attempted and failing as expected _(2026-10-08 15:53 SAST)_.
 
 **Cut line:** E1.8 board polish; password reset (E1.3) can slip to E5.
 
-**Handoff notes:** _(write at end of session)_
+**Handoff notes** _(written 2026-10-08 15:53 SAST, end of the E1 session)_
+
+**Built (E1.1–E1.8 done, E1.9 blocked on the steps below).** Auth (sign up, log in, log out,
+password reset) with `proxy.ts` route protection; onboarding (`complete_onboarding` →
+`private.create_workspace`) creating the company and its first member as executive approver;
+append-only `audit_events` with one server write helper, onboarding logged; the design
+tokens and `StatusPill` (only problems get colour, no green); the app shell (sidebar,
+header, account menu, phone drawer); dashboard and tender board with real empty states.
+Three new migrations are applied to the hosted dev project. `verify:rls` is 27/27,
+`test:e2e` 23/23, `test:unit` 7/7.
+
+**What you need to do by hand, in order:**
+
+1. **Vercel → Project → Settings → Environment Variables** (Production and Preview), then
+   redeploy the latest `main` (Deployments → ⋯ → Redeploy). Every deploy since `403583b`
+   (E1.3) failed with `Invalid public environment configuration: NEXT_PUBLIC_SUPABASE_URL`
+   (reproduced locally by building without `.env.local`). Vercel kept serving the E1.2
+   deploy, so the site still loads, but it is the old placeholder.
+   - `NEXT_PUBLIC_SUPABASE_URL` = the value in your `.env.local`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` = the `sb_publishable_…` value in `.env.local`
+   - `SUPABASE_SECRET_KEY` = the `sb_secret_…` value, marked **Sensitive**. Needed at
+     runtime by the audit helper. Never give it a `NEXT_PUBLIC_` prefix.
+   - (`SUPABASE_PROJECT_ID` is no longer read by the app.)
+2. **Supabase dashboard → Authentication → URL Configuration** (I can't read or change it
+   without a dashboard login; `supabase/config.toml` only covers local):
+   - Site URL: `https://ai-procurement-os.vercel.app`
+   - Redirect URLs: `https://ai-procurement-os.vercel.app/**` and `http://localhost:3000/**`
+3. **Decide how the client's sign-up email will reach him.** The hosted project has
+   "Confirm email" on, and Supabase's built-in mailer only delivers to members of your
+   Supabase team and only a few emails an hour, so his confirmation (and any password
+   reset) email will most likely never arrive. Options: (a) add custom SMTP (Supabase →
+   Authentication → Emails → SMTP; a provider account is yours to create), (b) turn off
+   "Confirm email" for the preview, or (c) invite him to the Supabase team for the demo.
+   I changed no auth settings.
+   _Optional, any device:_ change the "Confirm signup" and "Reset password" templates to
+   link to `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=signup&next=/` (and
+   `type=recovery&next=/reset-password`). The default links use PKCE and only work in the
+   browser that asked for the email; `/auth/callback` already accepts both.
+4. **After steps 1–2, run the live smoke test** (creates and deletes its own user):
+   `PLAYWRIGHT_BASE_URL=https://ai-procurement-os.vercel.app npx playwright test smoke`,
+   then mark E1.9 `[DONE]` and send the link.
+5. Your Vercel CLI login on this machine has expired (`vercel login` if you want the CLI).
+
+**Decisions and gotchas.**
+
+- E2E runs against `next build && next start`, not `next dev`: dev mode rewrites
+  Cache-Control on every response, which hid the `no-store` headers the auth tests assert.
+  In production, Next already marks Server Action responses `no-store`; the proxy applies
+  `@supabase/ssr`'s headers to session refreshes and redirects; `/auth/callback` sets them
+  itself.
+- Tests never wait for email: users are made with the admin API (`createUser`,
+  `generateLink`) and deleted in fixtures, pass or fail. They run against the hosted dev
+  project; the run leaves 0 users, organizations and audit events behind (checked).
+- Migrations were tried on a local Supabase first (Docker; `npx supabase start -x
+realtime,storage-api,imgproxy,edge-runtime,logflare,vector,supavisor,studio,postgres-meta`,
+  then `npx supabase migration up --local`, and `verify:rls` with the local URL/keys exported
+  from `npx supabase status -o env`), then pushed. Worth keeping: applied migrations can't
+  be edited. The local stack has been stopped.
+- Password reset only works from a fresh (15 min) email-link session; a password session
+  cannot set a new password without the old one (account takeover guard).
+- `next=` redirects are resolved by the URL parser and must stay same-origin (a tab before
+  a second slash was an open redirect, caught in review).
+- Audit events: no user INSERT grant (they could forge entries); written by the service
+  role through `recordAuditEvent`, which derives organization and actor itself. Not one
+  transaction with the workspace insert: a DB failure between them loses that one event
+  (logged). Move the insert into `private.create_workspace` if that ever matters.
+- Tender stages for the board (`reading`, `review`, `checking`, `checked`) are in
+  `src/lib/tenders/stages.ts`; E3.1's enum should reuse them. Status values for E2.5/E4.1
+  are in `src/lib/compliance/statuses.ts`.
+- Claude Opus 5.5 facts for E2.3 are in ARCHITECTURE §5 (effort default `medium`, no
+  forced `tool_choice`, structured outputs).
+- One test-setup call failed once with Supabase's `JWT issued at future` (clock skew); it
+  passed on re-run and did not recur.
+- Repo notes: the `.claude/` ignore question resolved itself (you committed the skills in
+  `a8fd7cd`). An empty, untracked `src/app/api/` folder exists; I left it alone. Prettier
+  now reads `globals.css` (`tailwindStylesheet`), so class order changed in a few files.
+
+**Cut or stashed:** nothing cut, no stashes. E1.9 is blocked only on steps 1–4 above.
+
+**Live URL status:** https://ai-procurement-os.vercel.app returns 200 but serves the E1.2
+placeholder (`/login` is 404). Latest `main` builds locally and passes everything; it needs
+the env vars to deploy.
 
 ---
 
@@ -174,3 +255,4 @@ Bid / no-bid engine · BOQ and pricing scenarios (VAT, markup vs margin) · MBD 
 | E1.6 | 2026-10-08 15:41 SAST | `main`                      | design plan in ARCHITECTURE §6 before code ✅ · tokens + 7 status tokens, `StatusPill` ✅ · contrast all text ≥ 4.9:1, control borders 3:1 ✅ · no green/purple/gradients ✅ · screenshots 1280/390 ✅ · audit ✅ · `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:e2e` 16/16 ✅ · code review fixes ✅                                                                                                                                                                            |
 | E1.7 | 2026-10-08 15:47 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:unit` 7/7 ✅ · `test:e2e` 21/21 ✅ (sidebar nav + `aria-current`, account menu incl. Esc and link-close, settings data, phone drawer, no sideways scroll at 390px on every page) · screenshots 1280/390 ✅ · audit fixes (drawer backdrop, invalid aria-label) ✅ · code review fix (menu closes on navigation) ✅                                                                                                                  |
 | E1.8 | 2026-10-08 15:51 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:unit` 7/7 ✅ · `test:e2e` 23/23 ✅ (dashboard empty states + legend; board has 4 stage columns at 0, no sample tenders, upload disabled with its reason) · screenshots 1280/390 ✅ · audit ✅ · code review fix (upload note copy) ✅                                                                                                                                                                                               |
+| E1.9 | — (blocked)           | `main`                      | smoke journey `tests/e2e/smoke.spec.ts` ✅ locally against `next start` · against the live URL ✘ (old deploy, `/auth/callback` 404) · Vercel deploys failing since E1.3 on missing env vars (reproduced locally) · test data cleaned up (0 users / orgs / events) ✅ · ARCHITECTURE §5 updated ✅                                                                                                                                                                                                 |

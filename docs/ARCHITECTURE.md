@@ -153,6 +153,15 @@ without edge-runtime restrictions.
 | Tender reading (key facts, returnables, validity rules)      | **Claude Opus 5.5**           | E3.3   | Accuracy-critical: a misread closing date or returnable list costs a bid. Native PDF input avoids a separate OCR service.                        |
 | Compliance matching and conflict checks                      | **None — deterministic code** | E4.1–2 | Predictable, testable, free to run, and explainable to the client. AI suggests requirement-to-category mappings only when a lookup has no match. |
 
+Model facts checked against the `claude-api` skill on 2026-10-08: `claude-opus-5-5`, $4 / $20
+per million input / output tokens (cache reads $0.20), 1M-token context, native PDF input
+(base64 document block, up to 32 MB and 600 pages) and images. Things E2.3 must know:
+thinking cannot be disabled (control depth with `output_config.effort`, whose default on
+this model is `medium`, so set it explicitly); forced `tool_choice` (`any`/`tool`) returns
+a 400, so get JSON back through structured outputs (`output_config.format`) and validate it
+with Zod anyway; no assistant prefill; check `stop_reason` for `refusal` before reading the
+content.
+
 Rules: every call goes through the AI gateway (`src/lib/ai/`, E2.3) and is logged in
 `ai_runs`. Responses are parsed with Zod; nothing unvalidated reaches the database. AI output
 is saved as _pending review_ and never constitutes an approval. Cost: roughly R5–R20 per
