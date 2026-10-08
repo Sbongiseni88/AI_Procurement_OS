@@ -39,6 +39,74 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_runs: {
+        Row: {
+          cache_read_tokens: number | null
+          cache_write_tokens: number | null
+          created_at: string
+          created_by: string | null
+          error: string | null
+          estimated_cost_usd: number | null
+          id: string
+          input_tokens: number | null
+          job_id: string | null
+          latency_ms: number
+          model: string
+          organization_id: string
+          outcome: Database["public"]["Enums"]["ai_run_outcome"]
+          output_tokens: number | null
+          provider: string
+          served_model: string | null
+          task: string
+        }
+        Insert: {
+          cache_read_tokens?: number | null
+          cache_write_tokens?: number | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          estimated_cost_usd?: number | null
+          id?: string
+          input_tokens?: number | null
+          job_id?: string | null
+          latency_ms: number
+          model: string
+          organization_id: string
+          outcome: Database["public"]["Enums"]["ai_run_outcome"]
+          output_tokens?: number | null
+          provider: string
+          served_model?: string | null
+          task: string
+        }
+        Update: {
+          cache_read_tokens?: number | null
+          cache_write_tokens?: number | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          estimated_cost_usd?: number | null
+          id?: string
+          input_tokens?: number | null
+          job_id?: string | null
+          latency_ms?: number
+          model?: string
+          organization_id?: string
+          outcome?: Database["public"]["Enums"]["ai_run_outcome"]
+          output_tokens?: number | null
+          provider?: string
+          served_model?: string | null
+          task?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_events: {
         Row: {
           action: string
@@ -508,6 +576,14 @@ export type Database = {
       }
     }
     Enums: {
+      ai_run_outcome:
+        | "succeeded"
+        | "refused"
+        | "truncated"
+        | "invalid_output"
+        | "timed_out"
+        | "provider_error"
+        | "not_configured"
       app_role:
         | "bid_manager"
         | "pricing_specialist"
@@ -646,6 +722,15 @@ export const Constants = {
   },
   public: {
     Enums: {
+      ai_run_outcome: [
+        "succeeded",
+        "refused",
+        "truncated",
+        "invalid_output",
+        "timed_out",
+        "provider_error",
+        "not_configured",
+      ],
       app_role: [
         "bid_manager",
         "pricing_specialist",

@@ -22,6 +22,28 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // Architecture rule 6: AI only through the gateway. Provider SDKs are imported in
+    // exactly one adapter each, under src/lib/ai/providers/.
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@anthropic-ai/sdk", "@anthropic-ai/sdk/*"],
+              message:
+                "Call AI through the gateway (src/lib/ai). Only src/lib/ai/providers/anthropic.ts imports the Anthropic SDK.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/ai/providers/anthropic.ts"],
+    rules: { "no-restricted-imports": "off" },
+  },
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",

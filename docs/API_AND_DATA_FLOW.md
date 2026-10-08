@@ -82,11 +82,31 @@ text is never shown.
 
 ## AI Payload Contracts
 
-All calls go through the provider-neutral AI gateway (`src/lib/ai/`, E1.5.6), which validates
-output with Zod and writes an `ai_runs` row (model, tokens, cost, latency, outcome).
+All calls go through the provider-neutral AI gateway (`src/lib/ai/`, built in E1.5.6), which
+validates output with Zod and writes an `ai_runs` row (model, served model, tokens, cost,
+latency, outcome). The call:
+
+```ts
+import { runAiTask, AiError } from "@/lib/ai"; // server only
+const { output, run } = await runAiTask({
+  task: "read_company_document", // routing in src/lib/ai/config.ts
+  organizationId,
+  jobId,
+  actorId, // from the job or session, never user input
+  instructions,
+  prompt,
+  files: [{ kind: "pdf", data }], // or { kind: "image", mediaType, data }
+  output: CompanyDocumentReadingSchema, // Zod; also sent as the structured-output schema
+});
+// throws AiError { code: not_configured | timed_out | provider_error | refused |
+//                  truncated | invalid_output, retryable }
+```
+
+Job handlers turn a non-retryable `AiError` into a `PermanentJobError`.
 
 | Pipeline                 | Model             | Input                     | Output schema (defined in ticket)                                                                                                                                              | Ticket |
 | ------------------------ | ----------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| Connectivity check       | `claude-opus-5-5` | Text only                 | `{ status: "ready" }` (opt-in live test only)                                                                                                                                  | E1.5.6 |
 | Company document reading | `claude-opus-5-5` | One PDF or image          | `CompanyDocumentReadingSchema`: type, issuer, entity name, registration no., address, issue/expiry dates, certification stamps (date, office, page), confidence per field      | E2.3   |
 | Tender reading           | `claude-opus-5-5` | Tender or RFQ PDF         | `TenderReadingSchema`: reference, issuer, closing and briefing dates, scoring system, returnable documents with mandatory flag, rules the tender states, page + quote per item | E3.3   |
 | Requirement mapping hint | `claude-opus-5-5` | One unmatched requirement | `CategorySuggestionSchema`: suggested document category + confidence (used only when the lookup table has no match)                                                            | E3.4   |

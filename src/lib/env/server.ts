@@ -22,11 +22,18 @@ const ServerEnvSchema = z.object({
    * disables the runner instead of the whole app.
    */
   CRON_SECRET: z.string().optional(),
+  /**
+   * The client's Anthropic API key for the AI gateway (E1.5.6). Optional: without it
+   * the app builds and runs, and every AI task fails with a clear "not configured"
+   * error. Checked by the gateway, not here, so a bad value disables AI, not the app.
+   */
+  ANTHROPIC_API_KEY: z.string().optional(),
 });
 
 const parsed = ServerEnvSchema.safeParse({
   SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
   CRON_SECRET: process.env.CRON_SECRET,
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
 });
 
 if (!parsed.success) {

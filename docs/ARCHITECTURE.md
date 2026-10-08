@@ -69,7 +69,7 @@ Route Handlers are used only for uploads, the job runner and AI work where neede
 | Documents and versions              | **Built** (E1.5.4)                                                                      |
 | Audit log and domain events         | **Built** (E1 ticket E1.5; E1.5.5)                                                      |
 | Jobs and job runner                 | **Built** (E1.5.5)                                                                      |
-| AI gateway                          | Planned, E1.5.6                                                                         |
+| AI gateway                          | **Built** (E1.5.6)                                                                      |
 
 **Trust boundary:** every database read and write crosses RLS. `auth.uid()` and the
 caller's `organization_id` are the only tenancy discriminators — the application layer
@@ -135,8 +135,8 @@ decision is a person's, and is logged. pgvector is not used in Phase 1.
 
 Built in E1.5: `src/lib/auth/permissions.ts` (permission matrix, E1.5.3), `src/lib/documents/`
 (documents and versions, E1.5.4), `src/lib/jobs/` (domain events, jobs and the job
-runner, E1.5.5), `src/app/api/jobs/run/` (runner route). Planned in E1.5: `src/lib/ai/`
-(AI gateway, E1.5.6).
+runner, E1.5.5), `src/app/api/jobs/run/` (runner route), `src/lib/ai/` (AI gateway,
+E1.5.6), `tests/live/` (opt-in live AI test).
 
 ---
 
@@ -194,12 +194,80 @@ thinking cannot be disabled (control depth with `output_config.effort`, whose de
 this model is `medium`, so set it explicitly); forced `tool_choice` (`any`/`tool`) returns
 a 400, so get JSON back through structured outputs (`output_config.format`) and validate it
 with Zod anyway; no assistant prefill; check `stop_reason` for `refusal` before reading the
-content.
+content. The gateway below does all of this.
 
 Rules: every call goes through the provider-neutral AI gateway (`src/lib/ai/`, E1.5.6) and
 is logged in `ai_runs`; no other file imports a provider SDK. Responses are parsed with Zod; nothing unvalidated reaches the database. AI output
 is saved as _pending review_ and never constitutes an approval. Cost: roughly R5–R20 per
 30-page tender at current Opus 5.5 rates ($4 / $20 per million input / output tokens).
+
+### AI gateway (built in E1.5.6)
+
+Every AI call goes through `src/lib/ai/` (Architecture rule 6). An ESLint rule
+(`no-restricted-imports`, checked by `tests/unit/ai-boundary.test.ts`) refuses the Anthropic
+SDK in every file except the adapter.
+
+```text
+caller (job handler, E2.3/E3.3)
+  └─ runAiTask({ task, organizationId, jobId?, actorId?, instructions, prompt, files?, output: ZodSchema })
+       src/lib/ai/index.ts     server only: configured providers + ai_runs log
+       src/lib/ai/gateway.ts   route → provider.generate (timeout) → JSON → Zod → log → result
+       src/lib/ai/config.ts    task → provider, model, effort, max output tokens, timeout; prices
+       src/lib/ai/types.ts     provider-neutral AiProvider interface, AiError
+       src/lib/ai/providers/anthropic.ts   the only SDK import (@anthropic-ai/sdk 0.132.1)
+       src/lib/ai/providers/fake.ts        used by every test; never calls a model
+       src/lib/ai/log.ts       ai_runs writer (service role)
+```
+
+| Task                           | Model             | Effort | Max output | Timeout | Built in |
+| ------------------------------ | ----------------- | ------ | ---------- | ------- | -------- |
+| `connectivity_check`           | `claude-opus-5-5` | low    | 2,000      | 60 s    | E1.5.6   |
+| `read_company_document`        | `claude-opus-5-5` | high   | 16,000     | 170 s   | E2.3     |
+| `read_tender`                  | `claude-opus-5-5` | high   | 32,000     | 170 s   | E3.3     |
+| `suggest_requirement_category` | `claude-opus-5-5` | low    | 2,000      | 60 s    | E3.4     |
+
+Timeouts stay below the job runner's 200 s budget; a job handler's own timeout must be
+longer than its task's. The reading tasks' effort and limits are tuned in their tickets.
+
+**Anthropic adapter.** Streams the request (`finalMessage()`), sends files as base64 PDF or
+image blocks, sets `output_config.effort` explicitly (Opus 5.5 defaults to `medium` and its
+thinking cannot be disabled), asks for JSON through structured outputs
+(`output_config.format`, built from the task's Zod schema by the SDK's
+`betaZodOutputFormat`), and opts into **refusal fallbacks** (`fallbacks: "default"`, beta
+`server-side-fallback-2026-07-01`): if a safety classifier declines a request, Anthropic
+re-runs it on its recommended fallback model. The model that answered is recorded as
+`served_model`. `stop_reason` `refusal` and `max_tokens` are checked before reading content.
+
+**Failures** are one typed `AiError` with a `code` and a `retryable` flag:
+
+| Code             | When                                                  | Retryable |
+| ---------------- | ----------------------------------------------------- | --------- |
+| `not_configured` | no usable `ANTHROPIC_API_KEY`, or the key was refused | no        |
+| `timed_out`      | the task's timeout ran out (the request is aborted)   | yes       |
+| `provider_error` | rate limit, 5xx, network (yes); 400/404 (no)          | depends   |
+| `refused`        | the model (and its fallback) declined                 | no        |
+| `truncated`      | the answer hit the output limit                       | no        |
+| `invalid_output` | not JSON, or not matching the Zod schema              | yes       |
+
+Error messages name schema fields, never values, because values come from client documents.
+
+**Run log.** Every call writes one `ai_runs` row, whatever the outcome: company, job,
+person, task, provider, model, served model, outcome, error, tokens (input, output, cache
+read and write), estimated cost in US dollars from the price table in `config.ts` (no
+estimate for a model without a price), and latency. No prompts, document contents or
+output. If the row cannot be written, the result is still returned and the miss is logged
+to the server log: failing would make the job retry and pay again.
+
+**Without a key** the app builds and runs; every AI task fails fast with `not_configured`
+and is logged. `ANTHROPIC_API_KEY` is optional in the server env schema and checked by the
+gateway (`sk-ant-…`, never an admin key), so a bad value disables AI, not the site.
+
+**Tests.** Unit: the gateway with the fake provider (routing, validation, refusal,
+truncation, timeout and abort, not configured, provider errors, log failure, cost); the
+adapter offline with a fake `fetch` (exact request body and headers, response and error
+mapping); the SDK boundary. E2E: `ai_runs` rows written to the real database. Live
+(opt-in, `npm run test:ai-live`): one `connectivity_check` on Claude Opus 5.5, skipped
+without a key.
 
 ---
 
@@ -399,7 +467,7 @@ person) links to `organizations` (the tenant) and carries the standard RLS polic
 | `audit_events`                   | Who did what, when, to which record. Append-only.                                                                                                                                          | **Built** (E1, ticket E1.5) |
 | `domain_events`                  | Business events (document uploaded, tender read, requirement confirmed) that jobs and future agents react to.                                                                              | **Built** (E1.5.5)          |
 | `jobs`                           | Background work: type, status, attempts, result, error, linked record.                                                                                                                     | **Built** (E1.5.5)          |
-| `ai_runs`                        | Every AI call: provider, model, task, tokens, cost, time, outcome.                                                                                                                         | Planned, E1.5.6             |
+| `ai_runs`                        | Every AI call: provider, model, task, tokens, cost, time, outcome.                                                                                                                         | **Built** (E1.5.6)          |
 | `documents`, `document_versions` | Any file in the system (company or tender) with immutable versions, SHA-256 hash, storage location, uploader.                                                                              | **Built** (E1.5.4)          |
 | `extracted_facts`                | Any fact read from any document: field, value, page, quote, confidence, which AI run or person, review status. Shared by Company DNA and the Digital Twin.                                 | Planned, E2.1               |
 | `evidence_items`                 | Company DNA: category (CSD, tax, B-BBEE, CIPC, CIDB, municipal…), the confirmed document version, issue and expiry dates, certification date.                                              | Planned, E2.1               |
@@ -431,7 +499,7 @@ erDiagram
     TENDER_REQUIREMENTS ||--o{ REQUIREMENT_DECISIONS : "reviewed in"
 ```
 
-Built today: `organizations`, `profiles`, `memberships`, `audit_events`, `documents`, `document_versions`, `domain_events`, `jobs` (detailed diagrams below). Every
+Built today: `organizations`, `profiles`, `memberships`, `audit_events`, `documents`, `document_versions`, `domain_events`, `jobs`, `ai_runs` (detailed diagrams below; the AI gateway is in §5). Every
 other entity in this diagram is planned, in the ticket named in the table above.
 
 ### Table conventions
@@ -481,6 +549,8 @@ Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 | `20261008160107_viewer_role`                        | E1.5.3  | `viewer` added to `app_role`                                                                                           |
 | `20261008161132_documents_and_versions`             | E1.5.4  | `documents`, `document_versions`, `add_document_version`, `forbid_row_changes`, `documents` bucket and its read policy |
 | `20261008162257_document_version_dedupe_and_audit`  | E1.5.4  | duplicate re-check under a lock, ignoring archived documents; audit entry in the same transaction                      |
+| `20261008163112_domain_events_and_jobs`             | E1.5.5  | `domain_events`, `jobs`, `job_status`, `record_domain_event`, `claim_jobs`; uploads record a domain event              |
+| `20261008164745_ai_runs`                            | E1.5.6  | append-only `ai_runs`, `ai_run_outcome`                                                                                |
 
 ```mermaid
 erDiagram
@@ -589,6 +659,7 @@ RLS is enabled on every table. `anon` is granted nothing.
 | `storage.objects` (`documents` bucket) | files in the active company's folder                                                                          | **denied** (service role)                            | **denied**                                                                                  | **denied**                                                    |
 | `domain_events`                        | active company only                                                                                           | **denied** (service role via `record_domain_event`)  | **denied to everyone**                                                                      | **denied to everyone** (only cascades with its organization)  |
 | `jobs`                                 | active company only                                                                                           | **denied** (service role via `record_domain_event`)  | **denied** (service role: the runner, after `claim_jobs`)                                   | **denied** (kept; cascades with its organization)             |
+| `ai_runs`                              | active company only                                                                                           | **denied** (service role via the gateway's log)      | **denied to everyone**                                                                      | **denied to everyone** (only cascades with its organization)  |
 
 INSERT and DELETE are denied to all user roles on these tables. That is intentional:
 inserting a membership or profile is how a user would otherwise put themselves into a
@@ -876,7 +947,7 @@ two writes, not one transaction, so a database failure between them loses that o
 ### Verification
 
 `npm run verify:rls` (`scripts/verify-rls.ts`) provisions organizations and users and asserts
-tenant isolation over the wire, as those users, through PostgREST. **57/57** as of E1.5.5.
+tenant isolation over the wire, as those users, through PostgREST. **59/59** as of E1.5.6.
 Cases that must fail: self-promotion and moving a membership to another company,
 organization creation, cross-tenant read and rename; onboarding twice, a second workspace,
 joining another company, blank or whitespace-only names, anonymous onboarding, and calling
@@ -895,7 +966,8 @@ files through the API, in another company or one's own. Mutation-tested: a stora
 without the company folder fails the cross-company file check. Events and jobs (E1.5.5):
 read only one's own company's; no direct write, no `record_domain_event` or `claim_jobs`
 call, no job update; events immutable and jobs undeletable even for the service role; a
-stored document version also records its `document.uploaded` event. The forged-selection check was mutation-tested: a helper that trusts the stored
+stored document version also records its `document.uploaded` event. AI runs (E1.5.6):
+read only one's own company's; no user writes; immutable even for the service role. The forged-selection check was mutation-tested: a helper that trusts the stored
 value fails three checks. The run deletes everything it created, sweeping by its run suffix
 so even a wrongly created organization is removed.
 
@@ -1035,3 +1107,7 @@ What Phase 1 builds and which later modules reuse it.
 | 44  | Jobs run right after enqueue (`after()`), with a daily cron as safety net | No queue service and no always-on worker. Hobby cron runs once a day, so the kick after enqueue does the work; a retry due later waits for the next kick.                                                                          |
 | 45  | Runner claims only what fits its time budget                              | A claimed job that the 300 s function limit cuts off loses an attempt and waits 15 minutes as stale. Claims are sized so every claimed job can finish.                                                                             |
 | 46  | `CRON_SECRET` optional; the runner route refuses without it               | The app must build and deploy before the secret exists. Checked in the route, so a bad value disables the runner, not the whole site.                                                                                              |
+| 47  | Refusal fallbacks on by default (`fallbacks: "default"`)                  | A safety-classifier false positive on a certificate or tender should not stop a reading job. The answering model is logged as `served_model`; review is unchanged.                                                                 |
+| 48  | Provider SDK confined to one adapter, enforced by ESLint and a test       | Rule 6 holds by construction, not by review: any other file importing `@anthropic-ai/sdk` fails lint.                                                                                                                              |
+| 49  | Answers validated twice: provider structured output and Zod               | Structured outputs make the JSON well formed; Zod is the contract and catches what the provider's schema subset cannot express (lengths, formats).                                                                                 |
+| 50  | A failed `ai_runs` write does not fail the task                           | The call already cost money; failing would make the job retry and pay again. The miss is logged to the server log.                                                                                                                 |

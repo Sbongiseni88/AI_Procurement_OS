@@ -1,7 +1,7 @@
 /**
  * RLS verification (T1.3, extended per ticket: E1.4 onboarding, E1.5 audit log,
  * E1.5.2 memberships, E1.5.3 viewer, E1.5.4 documents and file storage, E1.5.5 domain
- * events and jobs).
+ * events and jobs, E1.5.6 AI run log).
  *
  * `tsc` cannot test SQL, so tenant isolation has to be proven against a real
  * database. This script provisions two organizations with one user each, then
@@ -749,6 +749,61 @@ async function main(): Promise<void> {
       `edit: ${svcEditsEvent.error?.code ?? "ALLOWED"}; delete event: ${svcDeletesEvent.error?.code ?? "ALLOWED"}; delete job: ${svcDeletesJob.error?.code ?? "ALLOWED"}`,
     );
 
+    // ---- AI run log (E1.5.6) -------------------------------------------------
+    console.log("\nAI run log — ai_runs:");
+    const runs = await admin
+      .from("ai_runs")
+      .insert(
+        [orgA.id, orgB.id].map((orgId) => ({
+          organization_id: orgId,
+          task: "connectivity_check",
+          provider: "anthropic",
+          model: "claude-opus-5-5",
+          outcome: "succeeded",
+          latency_ms: 1200,
+        })),
+      )
+      .select("id, organization_id");
+    if (runs.error) throw new Error(`ai_runs seed failed: ${runs.error.message}`);
+    const runA = runs.data.find((r) => r.organization_id === orgA.id)?.id;
+    const runB = runs.data.find((r) => r.organization_id === orgB.id)?.id;
+    if (runA === undefined || runB === undefined) throw new Error("ai_runs seed incomplete");
+
+    const aRuns = await a.from("ai_runs").select("id, organization_id");
+    const aReadsBRun = await a.from("ai_runs").select("id").eq("id", runB);
+    check(
+      "a member reads its own company's AI runs only",
+      !aRuns.error &&
+        aRuns.data.some((r) => r.id === runA) &&
+        aRuns.data.every((r) => r.organization_id === orgA.id) &&
+        aReadsBRun.data?.length === 0,
+      aRuns.error?.message ?? `own=${aRuns.data?.length} other=${aReadsBRun.data?.length}`,
+    );
+
+    const aLogsRun = await a.from("ai_runs").insert({
+      organization_id: orgA.id,
+      task: "connectivity_check",
+      provider: "anthropic",
+      model: "claude-opus-5-5",
+      outcome: "succeeded",
+      latency_ms: 1,
+    });
+    const aEditsRun = await a
+      .from("ai_runs")
+      .update({ outcome: "refused" })
+      .eq("id", runA)
+      .select("id");
+    const svcEditsRun = await admin.from("ai_runs").update({ outcome: "refused" }).eq("id", runA);
+    const svcDeletesRun = await admin.from("ai_runs").delete().eq("id", runA);
+    check(
+      "nobody but the gateway writes AI runs, and nobody changes or deletes them",
+      aLogsRun.error !== null &&
+        (aEditsRun.error !== null || aEditsRun.data?.length === 0) &&
+        svcEditsRun.error !== null &&
+        svcDeletesRun.error !== null,
+      `insert: ${aLogsRun.error?.code ?? "ALLOWED"}; update: ${aEditsRun.error?.code ?? aEditsRun.data?.length}; service update: ${svcEditsRun.error?.code ?? "ALLOWED"}; service delete: ${svcDeletesRun.error?.code ?? "ALLOWED"}`,
+    );
+
     // ---- Memberships (E1.5.2) -------------------------------------------------
     console.log(
       "\nMemberships — user X, active member of A (bid_manager) and B (pricing_specialist):",
@@ -965,9 +1020,10 @@ async function main(): Promise<void> {
     const anonEventsAndJobs = await Promise.all([
       anon.from("domain_events").select("id"),
       anon.from("jobs").select("id"),
+      anon.from("ai_runs").select("id"),
     ]);
     check(
-      "anonymous callers see no domain events or jobs",
+      "anonymous callers see no domain events, jobs or AI runs",
       anonEventsAndJobs.every((r) => r.error !== null || r.data?.length === 0),
       anonEventsAndJobs.map((r) => r.error?.code ?? r.data?.length).join(", "),
     );
