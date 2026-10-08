@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,6 +8,11 @@ export const metadata: Metadata = {
   },
   description:
     "Tender compliance checker for South African bidders. Reads tenders and company documents, flags expired documents and stale certified copies, and lists every compliance gap.",
+};
+
+export const viewport: Viewport = {
+  // Matches --color-canvas in globals.css.
+  themeColor: "#f6f6f4",
 };
 
 /*

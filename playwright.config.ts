@@ -1,13 +1,21 @@
+import { existsSync } from "node:fs";
+
 import { defineConfig, devices } from "@playwright/test";
 
 /**
  * End-to-end tests (E1.2). Chromium only — the client's team uses Chrome and Edge,
  * and one engine keeps the suite fast enough to run before every push.
  *
- * By default Playwright starts `next dev` itself. Set PLAYWRIGHT_BASE_URL to run the
- * same tests against an already-running deployment (E1.9 live smoke test); no local
- * server is started then.
+ * By default Playwright builds the app and serves it with `next start`, so tests see
+ * what Vercel serves. `next dev` would not do: it rewrites Cache-Control on every
+ * response, which hides the no-store headers the auth tests assert. Set
+ * PLAYWRIGHT_BASE_URL to run the same tests against a deployment instead (E1.9 live
+ * smoke test); no local server is started then.
  */
+// Test setup creates and deletes users with the admin client, so the test process
+// needs the same env as the app. Variables already set in the shell win.
+if (existsSync(".env.local")) process.loadEnvFile(".env.local");
+
 const PORT = 3100;
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 
@@ -25,9 +33,10 @@ export default defineConfig({
   webServer: externalBaseUrl
     ? undefined
     : {
-        command: `npm run dev -- --port ${PORT}`,
+        command: `npm run build && npm run start -- --port ${PORT}`,
         url: `http://localhost:${PORT}`,
-        reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
+        // Always a fresh build: reusing a server left running would test stale code.
+        reuseExistingServer: false,
+        timeout: 240_000,
       },
 });

@@ -15,7 +15,8 @@
     "db:types": "supabase gen types typescript --linked > src/lib/supabase/database.types.ts.tmp && mv src/lib/supabase/database.types.ts.tmp src/lib/supabase/database.types.ts",
     "db:link": "supabase link --project-ref xrrbrwcnlhtcceaedazp",
     "verify:rls": "node --env-file=.env.local scripts/verify-rls.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:unit": "node --test \"tests/unit/**/*.test.ts\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

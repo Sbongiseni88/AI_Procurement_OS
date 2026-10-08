@@ -3,21 +3,47 @@
 /*
  * AI Procurement OS — design tokens.
  *
- * Deliberately minimal. The old prototype palette was removed; the real token set
- * (surfaces, one accent, and the Phase 1 status colours: compliant, expiring, expired,
- * missing, conflict, needs verification, unable to verify) is designed in E1.6.
+ * Provisional set added in E1.3 so the auth pages use token names from the start.
+ * E1.6 finalises the palette and adds the Phase 1 status colours (compliant,
+ * expiring, expired, missing, conflict, needs verification, unable to verify).
  * Direction: CLAUDE.md §1.2 — quiet, neutral, colour reserved for meaning.
  */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+
+  --color-canvas: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f0f0ed;
+  --color-line: #d9d9d4;
+  --color-ink: #1b1e23;
+  --color-ink-muted: #545a63;
+  --color-ink-subtle: #7b818a;
+
+  --color-accent: #1f3a5f;
+  --color-accent-hover: #172c48;
+  --color-accent-ink: #ffffff;
+
+  --color-danger: #b42318;
+  --color-danger-soft: #fdf1f0;
 }
 
 :root {
   color-scheme: light;
 }
 
+/* Remove the double-tap zoom delay on controls, and the grey flash on tap. */
+a,
+button,
+input,
+label,
+select,
+textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  background-color: #ffffff;
-  color: #1a1d23;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
   font-family: var(--font-sans);
 }

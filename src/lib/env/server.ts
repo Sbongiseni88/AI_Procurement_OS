@@ -14,13 +14,10 @@ const ServerEnvSchema = z.object({
   SUPABASE_SECRET_KEY: z.string().min(1).startsWith("sb_secret_", {
     error: "SUPABASE_SECRET_KEY must start with 'sb_secret_'.",
   }),
-  /** Project reference, used by the Supabase CLI for migrations and type codegen. */
-  SUPABASE_PROJECT_ID: z.string().min(1),
 });
 
 const parsed = ServerEnvSchema.safeParse({
   SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
-  SUPABASE_PROJECT_ID: process.env.SUPABASE_PROJECT_ID,
 });
 
 if (!parsed.success) {

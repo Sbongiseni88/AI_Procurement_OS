@@ -35,7 +35,8 @@ Security entirely.
 | `npm run db:link`    | Link the Supabase CLI to the hosted project                |
 | `npm run db:push`    | Apply new migrations to the hosted database                |
 | `npm run db:types`   | Regenerate `database.types.ts` (run after every migration) |
-| `npm run test:e2e`   | Playwright end-to-end tests (starts `next dev` on :3100)   |
+| `npm run test:e2e`   | Playwright end-to-end tests (builds, serves on :3100)      |
+| `npm run test:unit`  | Unit tests for pure logic (`node --test`)                  |
 | `npm run verify:rls` | Live tenant-isolation test against the hosted database     |
 
 Every ticket must pass `typecheck`, `lint`, `format:check`, `build` and `test:e2e` before it is

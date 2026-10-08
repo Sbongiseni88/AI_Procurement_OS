@@ -1,7 +1,7 @@
 # API & Data Flow — AI Procurement OS, Phase 1
 
-> **Status:** No endpoints exist yet. Entries are added by the ticket that builds them
-> (auth and onboarding from E1.3, uploads from E2.2, AI reading from E2.4 and E3.3).
+> **Status:** Auth (E1.3) is built. Entries are added by the ticket that builds them
+> (onboarding E1.4, uploads E2.2, AI reading E2.4 and E3.3).
 
 ## Conventions
 
@@ -33,9 +33,19 @@ Before adding an entry below, pick the right Supabase client (see ARCHITECTURE.m
 
 ## Endpoint Register
 
-| Route / Action | Kind | Auth | Request schema | Response schema | Task |
-| -------------- | ---- | ---- | -------------- | --------------- | ---- |
-| _none yet_     | —    | —    | —              | —               | —    |
+| Route / Action                      | Kind          | Auth                     | Request schema                            | Response                                                                           | Task |
+| ----------------------------------- | ------------- | ------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------- | ---- |
+| `proxy` (`src/proxy.ts`)            | Proxy         | any                      | —                                         | refreshes session; redirects to `/login?next=` or away from guest pages            | E1.3 |
+| `logIn` (`src/lib/auth/actions.ts`) | Server Action | signed out               | `LogInSchema` (email, password, next?)    | `AuthFormState`, or redirect to `safeNextPath(next)`                               | E1.3 |
+| `signUp`                            | Server Action | signed out               | `SignUpSchema` (email, password ≥ 8)      | `AuthFormState` `sent` (confirmation email), or redirect to `/`                    | E1.3 |
+| `requestPasswordReset`              | Server Action | signed out               | `PasswordResetRequestSchema` (email)      | `AuthFormState` `sent`; same answer whether or not the account exists              | E1.3 |
+| `updatePassword`                    | Server Action | fresh email-link session | `NewPasswordSchema` (password, confirm)   | `AuthFormState`, or redirect to `/`                                                | E1.3 |
+| `logOut`                            | Server Action | signed in                | —                                         | redirect to `/login`                                                               | E1.3 |
+| `GET /auth/callback`                | Route Handler | public                   | `?code=` or `?token_hash=&type=`, `next?` | redirect to `next` with session cookies, or `/login?error=link`; always `no-store` | E1.3 |
+
+`AuthFormState` (`src/lib/auth/schemas.ts`) is `idle` · `error` (message, per-field errors,
+echoed email) · `sent` (message, email). Messages are plain language; Supabase's raw error
+text is never shown.
 
 ## AI Payload Contracts
 
