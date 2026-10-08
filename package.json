@@ -14,7 +14,8 @@
     "db:push": "supabase db push",
     "db:types": "supabase gen types typescript --linked > src/lib/supabase/database.types.ts.tmp && mv src/lib/supabase/database.types.ts.tmp src/lib/supabase/database.types.ts",
     "db:link": "supabase link --project-ref xrrbrwcnlhtcceaedazp",
-    "verify:rls": "node --env-file=.env.local scripts/verify-rls.ts"
+    "verify:rls": "node --env-file=.env.local scripts/verify-rls.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -27,6 +28,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
