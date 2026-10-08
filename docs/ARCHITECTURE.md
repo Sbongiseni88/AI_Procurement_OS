@@ -67,14 +67,15 @@ pgvector is not used in Phase 1.
 ├── src/
 │   ├── proxy.ts          # session refresh + route guard (Next 16's middleware)
 │   ├── app/              # Next.js App Router — routes, layouts, route handlers
-│   │   ├── (auth)/       # /login, /signup, /forgot-password, /reset-password
+│   │   ├── (auth)/       # /login, /signup, /forgot-password, /reset-password, /onboarding
 │   │   ├── auth/callback/ # landing route for auth email links
 │   │   ├── globals.css   # Tailwind 4 @theme tokens (provisional; finalised in E1.6)
 │   │   ├── layout.tsx    # Root layout
 │   │   └── page.tsx      # Signed-in placeholder (replaced by app shell in E1.7/E1.8)
-│   ├── components/       # forms/ (Field, SubmitButton, FormMessage), auth/ (forms)
+│   ├── components/       # forms/ (Field, SubmitButton, FormMessage), auth/, workspace/
 │   └── lib/
 │       ├── auth/         # Server Actions, Zod schemas, session helpers, path rules
+│       ├── workspace/    # membership (profile + organization), onboarding action
 │       ├── env/          # Zod-validated environment, split by trust boundary
 │       │   ├── public.ts # NEXT_PUBLIC_* — safe on both sides
 │       │   └── server.ts # secret key — `server-only`
@@ -254,7 +255,13 @@ Email + password through Supabase Auth, as Server Actions in `src/lib/auth/actio
 
 ## 8. Data Model
 
-Migration: `supabase/migrations/20260908133617_init_organizations_profiles_rbac.sql`.
+Migrations (in `supabase/migrations/`, applied to the hosted dev project):
+
+| Migration                                           | Ticket | Adds                                                                |
+| --------------------------------------------------- | ------ | ------------------------------------------------------------------- |
+| `20260908133617_init_organizations_profiles_rbac`   | T1.3   | `organizations`, `profiles`, `app_role`, RLS, anti-escalation       |
+| `20261008132310_onboarding_create_workspace`        | E1.4   | `private` schema, `private.create_workspace`, `complete_onboarding` |
+| `20261008132832_onboarding_reject_whitespace_names` | E1.4   | names must contain visible text (tabs/newlines no longer pass)      |
 
 ```mermaid
 erDiagram
@@ -305,7 +312,8 @@ RLS is enabled on both tables. `anon` is granted nothing.
 
 INSERT and DELETE are denied to all user roles on both tables. That is intentional:
 provisioning a profile is how a user would otherwise insert themselves into a rival's
-organization. Both are `service_role`-only.
+organization. Both are `service_role`-only, with one exception: onboarding (below) creates
+a _new_ organization and the caller's own first profile.
 
 ### Anti-escalation, in two layers
 
@@ -338,12 +346,34 @@ Both return NULL when the caller has no profile, so every policy **fails closed*
 Policies wrap them as `(select fn())` rather than `fn()`, so Postgres evaluates them once per
 statement as an InitPlan instead of once per row.
 
+### Onboarding (E1.4)
+
+A new sign-up has no profile, so every policy returns nothing for them (fail closed). The
+app sends them to `/onboarding`, whose Server Action calls `rpc("complete_onboarding")`.
+
+```
+public.complete_onboarding(company_name, full_name)   SECURITY INVOKER, exposed via PostgREST
+  └─ private.create_workspace(company_name, full_name) SECURITY DEFINER, schema not exposed
+       1. auth.uid() must be set
+       2. both names: 1–200 visible characters (all whitespace trimmed)
+       3. caller must have NO profile yet (profiles.id PK also stops a concurrent repeat)
+       4. insert organizations → insert profiles (caller, new org, executive_approver)
+```
+
+There is no user-id or organization-id parameter, so it can only create a workspace for
+the caller and can never attach anyone to an existing company. Both inserts happen in one
+function call, so a failure leaves neither behind. The first member is `executive_approver`
+(the company's owner); later members arrive by invitation, which is not in Phase 1.
+
 ### Verification
 
-`npm run verify:rls` (`scripts/verify-rls.ts`) provisions two organizations with one user
-each and asserts tenant isolation over the wire, as those users, through PostgREST. 12/12
-passing as of T1.3, including the cases that must fail: self-promotion, self-transfer between
-organizations, organization creation, and cross-tenant read and rename.
+`npm run verify:rls` (`scripts/verify-rls.ts`) provisions organizations and users and asserts
+tenant isolation over the wire, as those users, through PostgREST. **20/20** as of E1.4.
+Cases that must fail: self-promotion, self-transfer between organizations, organization
+creation, cross-tenant read and rename; onboarding twice, a second workspace, joining
+another company, blank or whitespace-only names, anonymous onboarding, and calling
+`private.create_workspace` through the API. The run deletes everything it created,
+sweeping by its run suffix so even a wrongly created organization is removed.
 
 ### Generated types
 
@@ -356,11 +386,6 @@ unknown column names inside a `.select("...")` string — supabase-js's select-s
 permissive about those, so a typo there fails at runtime, not compile time.
 
 ### Not yet built
-
-There is **no path for a new signup to obtain an organization**, because INSERT is denied on
-both tables. E1.4 supplies a `SECURITY DEFINER` onboarding function (in a non-exposed schema,
-with an `auth.uid()` check) that creates an organization and its first profile in one
-transaction.
 
 Planned tables, each added with RLS and `verify:rls` coverage in its ticket:
 `audit_events` (E1.5) · `company_documents`, `ai_runs` and validity settings on
@@ -384,26 +409,28 @@ Phase 1; the booklet's larger role set is a later-phase decision.
 
 ## 10. Decision Log
 
-| #   | Decision                                                             | Rationale                                                                                                                                               |
-| --- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Next.js app at repo root, not a monorepo                             | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                |
-| 2   | PDF extraction via Next.js Route Handlers, not a Python service      | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.  |
-| 3   | Anthropic over OpenAI                                                | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                 |
-| 4   | System font stack, not Geist                                         | No build-time font fetch. Revisited in E1.6 when the design system is defined.                                                                          |
-| 5   | RLS as the tenancy enforcement point                                 | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                            |
-| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)      | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                            |
-| 7   | Three separate Supabase clients rather than one configurable factory | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site. |
-| 8   | Env validated with Zod at import time, split by trust boundary       | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                |
-| 9   | `Database` type is a committed placeholder until T1.3                | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.        |
-| 10  | `profiles.organization_id` NOT NULL                                  | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                         |
-| 11  | INSERT/DELETE denied to all user roles on both tables                | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                      |
-| 12  | Anti-escalation duplicated across column GRANTs and a trigger        | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                             |
-| 13  | Phase 1 narrowed to a tender compliance checker                      | Client's booklet has 45 builds; the quote covers five milestones ending 13 Nov 2026. Later phases are listed in `docs/TASKS.md`.                        |
-| 14  | Old static prototype deleted; UI designed fresh                      | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                          |
-| 15  | Client's earlier Python/FastAPI builds not used                      | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.         |
-| 16  | Compliance matching is deterministic code, not AI                    | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                            |
-| 17  | Claude Opus 5.5 through a single AI gateway                          | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                   |
-| 18  | Third-party Claude skills vendored into `.claude/skills/`            | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                 |
-| 19  | E2E suite runs against `next build && next start`, not `next dev`    | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                               |
-| 20  | Tests create users with the admin API (`createUser`, `generateLink`) | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.           |
-| 21  | Password reset only from a fresh email-link session                  | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                         |
+| #   | Decision                                                               | Rationale                                                                                                                                               |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Next.js app at repo root, not a monorepo                               | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                |
+| 2   | PDF extraction via Next.js Route Handlers, not a Python service        | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.  |
+| 3   | Anthropic over OpenAI                                                  | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                 |
+| 4   | System font stack, not Geist                                           | No build-time font fetch. Revisited in E1.6 when the design system is defined.                                                                          |
+| 5   | RLS as the tenancy enforcement point                                   | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                            |
+| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)        | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                            |
+| 7   | Three separate Supabase clients rather than one configurable factory   | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site. |
+| 8   | Env validated with Zod at import time, split by trust boundary         | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                |
+| 9   | `Database` type is a committed placeholder until T1.3                  | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.        |
+| 10  | `profiles.organization_id` NOT NULL                                    | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                         |
+| 11  | INSERT/DELETE denied to all user roles on both tables                  | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                      |
+| 12  | Anti-escalation duplicated across column GRANTs and a trigger          | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                             |
+| 13  | Phase 1 narrowed to a tender compliance checker                        | Client's booklet has 45 builds; the quote covers five milestones ending 13 Nov 2026. Later phases are listed in `docs/TASKS.md`.                        |
+| 14  | Old static prototype deleted; UI designed fresh                        | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                          |
+| 15  | Client's earlier Python/FastAPI builds not used                        | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.         |
+| 16  | Compliance matching is deterministic code, not AI                      | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                            |
+| 17  | Claude Opus 5.5 through a single AI gateway                            | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                   |
+| 18  | Third-party Claude skills vendored into `.claude/skills/`              | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                 |
+| 19  | E2E suite runs against `next build && next start`, not `next dev`      | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                               |
+| 20  | Tests create users with the admin API (`createUser`, `generateLink`)   | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.           |
+| 21  | Password reset only from a fresh email-link session                    | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                         |
+| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public` | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.              |
+| 23  | Workspace creator becomes `executive_approver`                         | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                        |

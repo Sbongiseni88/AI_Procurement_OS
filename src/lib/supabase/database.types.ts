@@ -109,6 +109,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      complete_onboarding: {
+        Args: { company_name: string; full_name: string }
+        Returns: string
+      }
       current_organization_id: { Args: never; Returns: string }
       current_user_role: {
         Args: never

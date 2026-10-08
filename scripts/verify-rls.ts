@@ -1,5 +1,5 @@
 /**
- * RLS verification for T1.3.
+ * RLS verification (T1.3, extended per ticket: E1.4 onboarding).
  *
  * `tsc` cannot test SQL, so tenant isolation has to be proven against a real
  * database. This script provisions two organizations with one user each, then
@@ -194,6 +194,127 @@ async function main(): Promise<void> {
       `affected ${bOwnOrgUpdate.data?.length ?? 0} rows`,
     );
 
+    // ---- Onboarding (E1.4) ---------------------------------------------------
+    console.log("\nOnboarding — complete_onboarding():");
+
+    /** A confirmed user with NO profile, i.e. someone who has just signed up. */
+    async function createNewcomer(label: string): Promise<string> {
+      const email = `rls-${label}-${RUN}@example.com`;
+      const u = await admin.auth.admin.createUser({
+        email,
+        password: PASSWORD,
+        email_confirm: true,
+      });
+      if (u.error || !u.data.user) throw new Error(`createUser failed: ${u.error?.message}`);
+      created.userIds.push(u.data.user.id);
+      return email;
+    }
+
+    async function orgsNamed(name: string): Promise<number> {
+      const r = await admin.from("organizations").select("id").eq("name", name);
+      if (r.error) throw new Error(`org lookup failed: ${r.error.message}`);
+      return r.data.length;
+    }
+
+    const aAgain = await a.rpc("complete_onboarding", {
+      company_name: `Alpha Second ${RUN}`,
+      full_name: "A again",
+    });
+    check(
+      "a user who already has a profile CANNOT onboard again",
+      aAgain.error !== null && (await orgsNamed(`Alpha Second ${RUN}`)) === 0,
+      aAgain.error ? `blocked: ${aAgain.error.code}` : "SECOND WORKSPACE CREATED — CRITICAL",
+    );
+
+    const c = await signIn(await createNewcomer("c"));
+    const cBefore = await c.from("organizations").select("id");
+    check(
+      "a newcomer without a profile sees no organizations (fails closed)",
+      !cBefore.error && cBefore.data?.length === 0,
+      cBefore.error?.message ?? `got ${cBefore.data?.length} rows`,
+    );
+
+    const cOnboard = await c.rpc("complete_onboarding", {
+      company_name: `  Gamma Supplies ${RUN}  `,
+      full_name: "Casey",
+    });
+    if (typeof cOnboard.data === "string") created.orgIds.push(cOnboard.data);
+    const cOrgs = await c.from("organizations").select("id, name");
+    const cProfile = await c.from("profiles").select("organization_id, role, full_name");
+    check(
+      "a newcomer creates exactly one workspace and becomes its executive_approver",
+      !cOnboard.error &&
+        cOrgs.data?.length === 1 &&
+        cOrgs.data[0]?.id === cOnboard.data &&
+        cOrgs.data[0]?.name === `Gamma Supplies ${RUN}` &&
+        cProfile.data?.length === 1 &&
+        cProfile.data[0]?.organization_id === cOnboard.data &&
+        cProfile.data[0]?.role === "executive_approver",
+      cOnboard.error?.message ?? `orgs=${cOrgs.data?.length} profiles=${cProfile.data?.length}`,
+    );
+
+    const cAgain = await c.rpc("complete_onboarding", {
+      company_name: `Gamma Second ${RUN}`,
+      full_name: "Casey",
+    });
+    const cOrgsAfter = await c.from("organizations").select("id");
+    check(
+      "the same user CANNOT create a second workspace",
+      cAgain.error !== null &&
+        (await orgsNamed(`Gamma Second ${RUN}`)) === 0 &&
+        cOrgsAfter.data?.length === 1,
+      cAgain.error ? `blocked: ${cAgain.error.code}` : "SECOND WORKSPACE CREATED — CRITICAL",
+    );
+
+    const cId = (await c.auth.getUser()).data.user?.id ?? "";
+    const cJoin = await c.from("profiles").update({ organization_id: orgA.id }).eq("id", cId);
+    const cSeesA = await c.from("organizations").select("id").eq("id", orgA.id);
+    check(
+      "an onboarded user CANNOT move into another company afterwards",
+      cJoin.error !== null && cSeesA.data?.length === 0,
+      cJoin.error ? `blocked: ${cJoin.error.code}` : "PROFILE MOVED — CRITICAL",
+    );
+
+    const d = await signIn(await createNewcomer("d"));
+    // Spaces, and whitespace Postgres `trim()` alone would not strip (tabs, newlines).
+    const blanks = await Promise.all(
+      ["   ", "\t\n", "\r\n\t "].map((blank) =>
+        d.rpc("complete_onboarding", { company_name: blank, full_name: "Dana" }),
+      ),
+    );
+    const blankName = await d.rpc("complete_onboarding", {
+      company_name: `Delta Named ${RUN}`,
+      full_name: "\t\n",
+    });
+    const dProfile = await d.from("profiles").select("id");
+    check(
+      "blank company or person names (any whitespace) are refused and leave nothing behind",
+      blanks.every((r) => r.error !== null) &&
+        blankName.error !== null &&
+        dProfile.data?.length === 0 &&
+        (await orgsNamed(`Delta Named ${RUN}`)) === 0,
+      blanks.map((r) => r.error?.code ?? "CREATED").join(",") + ` / ${blankName.error?.code}`,
+    );
+
+    const dPrivate = await d
+      .schema("private")
+      .rpc("create_workspace", { company_name: `Delta ${RUN}`, full_name: "Dana" });
+    const dDirect = await fetch(`${URL}/rest/v1/rpc/create_workspace`, {
+      method: "POST",
+      headers: {
+        apikey: PUBLISHABLE,
+        Authorization: `Bearer ${(await d.auth.getSession()).data.session?.access_token ?? ""}`,
+        "Content-Type": "application/json",
+        "Content-Profile": "private",
+      },
+      body: JSON.stringify({ company_name: `Delta ${RUN}`, full_name: "Dana" }),
+    });
+    check(
+      "the SECURITY DEFINER function is not reachable through the API",
+      dPrivate.error !== null && !dDirect.ok && (await orgsNamed(`Delta ${RUN}`)) === 0,
+      `schema('private'): ${dPrivate.error?.code ?? "ok"}; direct: HTTP ${dDirect.status}`,
+    );
+
     // ---- Anonymous access ---------------------------------------------------
     console.log("\nAnonymous (no session):");
     const anon = createClient(URL, PUBLISHABLE, {
@@ -204,6 +325,15 @@ async function main(): Promise<void> {
       "anonymous callers see no organizations",
       anonOrgs.error !== null || anonOrgs.data?.length === 0,
       anonOrgs.error ? `blocked: ${anonOrgs.error.code}` : `got ${anonOrgs.data?.length} rows`,
+    );
+    const anonOnboard = await anon.rpc("complete_onboarding", {
+      company_name: `Anon ${RUN}`,
+      full_name: "Anon",
+    });
+    check(
+      "anonymous callers CANNOT run onboarding",
+      anonOnboard.error !== null && (await orgsNamed(`Anon ${RUN}`)) === 0,
+      anonOnboard.error ? `blocked: ${anonOnboard.error.code}` : "ANON WORKSPACE CREATED",
     );
     const anonProfiles = await anon.from("profiles").select("id");
     check(
@@ -222,7 +352,12 @@ async function main(): Promise<void> {
         `  user ${id.slice(0, 8)} ${error ? `NOT deleted: ${error.message}` : "deleted"}`,
       );
     }
-    // Profiles cascade with the user; organizations must go explicitly.
+    // Profiles cascade with the user; organizations must go explicitly. Sweep by the
+    // run suffix too, so an organization from a call that wrongly succeeded is removed.
+    const swept = await admin.from("organizations").select("id").like("name", `%${RUN}%`);
+    for (const row of swept.data ?? []) {
+      if (!created.orgIds.includes(row.id)) created.orgIds.push(row.id);
+    }
     for (const id of created.orgIds) {
       const { error } = await admin.from("organizations").delete().eq("id", id);
       console.log(

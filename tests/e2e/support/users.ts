@@ -48,3 +48,47 @@ export async function deleteUser(id: string): Promise<void> {
   const { error } = await adminClient().auth.admin.deleteUser(id);
   if (error) throw new Error(`deleteUser ${id} failed: ${error.message}`);
 }
+
+export type TestMember = TestUser & { organizationId: string; organizationName: string };
+
+/** A confirmed user who already has a workspace (organization + profile). */
+export async function createMember(label = "member"): Promise<TestMember> {
+  const admin = adminClient();
+  const organizationName = `E2E Company ${randomUUID().slice(0, 8)}`;
+  const org = await admin.from("organizations").insert({ name: organizationName }).select("id");
+  const organizationId = org.data?.[0]?.id;
+  if (org.error || typeof organizationId !== "string") {
+    throw new Error(`organization insert failed: ${org.error?.message}`);
+  }
+  const user = await createConfirmedUser(label);
+  const profile = await admin.from("profiles").insert({
+    id: user.id,
+    organization_id: organizationId,
+    role: "bid_manager",
+    full_name: "E2E Member",
+  });
+  if (profile.error) {
+    await deleteUser(user.id);
+    await deleteOrganization(organizationId);
+    throw new Error(`profile insert failed: ${profile.error.message}`);
+  }
+  return { ...user, organizationId, organizationName };
+}
+
+/** Deletes a user and the organization their profile belonged to, if any. */
+export async function deleteUserAndWorkspace(userId: string): Promise<void> {
+  const admin = adminClient();
+  const profile = await admin
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", userId)
+    .maybeSingle();
+  await deleteUser(userId);
+  const organizationId: unknown = profile.data?.organization_id;
+  if (typeof organizationId === "string") await deleteOrganization(organizationId);
+}
+
+export async function deleteOrganization(id: string): Promise<void> {
+  const { error } = await adminClient().from("organizations").delete().eq("id", id);
+  if (error) throw new Error(`delete organization ${id} failed: ${error.message}`);
+}

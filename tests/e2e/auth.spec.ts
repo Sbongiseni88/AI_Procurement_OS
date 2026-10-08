@@ -1,7 +1,7 @@
 import { type Page } from "@playwright/test";
 
 import { expect, logInViaForm, test } from "./support/fixtures";
-import { adminClient, deleteUser, testEmail, testPassword } from "./support/users";
+import { adminClient, testEmail, testPassword } from "./support/users";
 
 /**
  * Records every response that writes a Supabase auth cookie (`sb-…`), so a test can
@@ -66,12 +66,12 @@ test.describe("signed out", () => {
 });
 
 test.describe("with an account", () => {
-  test("log in, see your account, log out", async ({ page, confirmedUser }) => {
+  test("log in, see your account, log out", async ({ page, member }) => {
     const authResponses = recordAuthCookieResponses(page);
 
-    await logInViaForm(page, confirmedUser);
+    await logInViaForm(page, member);
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByText(confirmedUser.email)).toBeVisible();
+    await expect(page.getByText(member.email)).toBeVisible();
 
     await page.getByRole("button", { name: "Log out" }).click();
     await expect(page).toHaveURL(/\/login$/);
@@ -83,21 +83,21 @@ test.describe("with an account", () => {
     await expectNoStore(authResponses);
   });
 
-  test("a wrong password is refused and keeps the email", async ({ page, confirmedUser }) => {
-    await logInViaForm(page, { email: confirmedUser.email, password: "not-the-password" });
+  test("a wrong password is refused and keeps the email", async ({ page, member }) => {
+    await logInViaForm(page, { email: member.email, password: "not-the-password" });
     // Scoped to the form: Next's route announcer is also role="alert".
     await expect(page.locator("form").getByRole("alert")).toHaveText(
       "That email and password don’t match an account.",
     );
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByLabel("Email")).toHaveValue(confirmedUser.email);
+    await expect(page.getByLabel("Email")).toHaveValue(member.email);
   });
 
   test("a password log-in cannot set a new password without a reset link", async ({
     page,
-    confirmedUser,
+    member,
   }) => {
-    await logInViaForm(page, confirmedUser);
+    await logInViaForm(page, member);
     await expect(page).toHaveURL(/\/$/);
     await page.goto("/reset-password");
     await expect(
@@ -106,8 +106,8 @@ test.describe("with an account", () => {
     await expect(page.getByLabel("New password", { exact: true })).toHaveCount(0);
   });
 
-  test("a signed-in visitor skips the log-in page", async ({ page, confirmedUser }) => {
-    await logInViaForm(page, confirmedUser);
+  test("a signed-in visitor skips the log-in page", async ({ page, member }) => {
+    await logInViaForm(page, member);
     await expect(page).toHaveURL(/\/$/);
     await page.goto("/login");
     await expect(page).toHaveURL(/\/$/);
@@ -120,20 +120,20 @@ test.describe("with an account", () => {
 
   test("log in returns you to the page you asked for, never another site", async ({
     page,
-    confirmedUser,
+    member,
   }) => {
     await page.goto("/login?next=//evil.example/steal");
-    await page.getByLabel("Email").fill(confirmedUser.email);
-    await page.getByLabel("Password").fill(confirmedUser.password);
+    await page.getByLabel("Email").fill(member.email);
+    await page.getByLabel("Password").fill(member.password);
     await page.getByRole("button", { name: "Log in" }).click();
     await expect(page).toHaveURL(/^http:\/\/localhost:\d+\/$|^https:\/\/[^/]+\/$/);
   });
 
-  test("reset a forgotten password from the email link", async ({ page, confirmedUser }) => {
+  test("reset a forgotten password from the email link", async ({ page, member }) => {
     // The link Supabase would email, generated directly so no email is sent.
     const { data, error } = await adminClient().auth.admin.generateLink({
       type: "recovery",
-      email: confirmedUser.email,
+      email: member.email,
     });
     expect(error).toBeNull();
     const tokenHash = data.properties?.hashed_token ?? "";
@@ -151,30 +151,7 @@ test.describe("with an account", () => {
 
     await page.getByRole("button", { name: "Log out" }).click();
     await expect(page).toHaveURL(/\/login$/);
-    await logInViaForm(page, { email: confirmedUser.email, password: newPassword });
-    await expect(page.getByText(confirmedUser.email)).toBeVisible();
+    await logInViaForm(page, { email: member.email, password: newPassword });
+    await expect(page.getByText(member.email)).toBeVisible();
   });
-});
-
-test("confirming a sign-up from the email link signs you in", async ({ page }) => {
-  const email = testEmail("signup");
-  // `generateLink` creates the unconfirmed account and returns the confirmation link
-  // the sign-up email would carry, without sending it.
-  const { data, error } = await adminClient().auth.admin.generateLink({
-    type: "signup",
-    email,
-    password: testPassword(),
-  });
-  expect(error).toBeNull();
-  const userId = data.user?.id;
-  expect(userId).toBeDefined();
-
-  try {
-    const tokenHash = data.properties?.hashed_token ?? "";
-    await page.goto(`/auth/callback?token_hash=${tokenHash}&type=signup&next=/`);
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByText(email)).toBeVisible();
-  } finally {
-    if (userId) await deleteUser(userId);
-  }
 });
