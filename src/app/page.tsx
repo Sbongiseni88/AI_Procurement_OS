@@ -12,14 +12,14 @@ export default async function Home() {
       <h1 className="text-2xl font-semibold tracking-tight text-balance break-words">
         {organization.name}
       </h1>
-      <p className="text-ink-muted text-sm break-words">
-        Signed in as <span className="text-ink font-medium">{fullName || email}</span> ({email}) ·{" "}
+      <p className="text-sm break-words text-ink-muted">
+        Signed in as <span className="font-medium text-ink">{fullName || email}</span> ({email}) ·{" "}
         {ROLE_LABELS[role]}
       </p>
       <form action={logOut}>
         <button
           type="submit"
-          className="border-line bg-surface text-ink hover:bg-surface-muted focus-visible:outline-accent h-9 rounded-md border px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="h-9 rounded-md border border-line-strong bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           Log out
         </button>

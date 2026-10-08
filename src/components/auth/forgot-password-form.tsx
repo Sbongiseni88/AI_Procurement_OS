@@ -18,7 +18,7 @@ export function ForgotPasswordForm() {
     return (
       <div className="flex flex-col gap-4">
         <FormMessage tone="info">{state.message}</FormMessage>
-        <Link href="/login" className="text-accent text-sm underline-offset-4 hover:underline">
+        <Link href="/login" className="text-sm text-accent underline-offset-4 hover:underline">
           Back to log in
         </Link>
       </div>
@@ -39,7 +39,7 @@ export function ForgotPasswordForm() {
         error={state.status === "error" ? state.fieldErrors?.email : undefined}
       />
       <SubmitButton label="Send reset link" pendingLabel="Sending…" />
-      <Link href="/login" className="text-accent text-sm underline-offset-4 hover:underline">
+      <Link href="/login" className="text-sm text-accent underline-offset-4 hover:underline">
         Back to log in
       </Link>
     </form>

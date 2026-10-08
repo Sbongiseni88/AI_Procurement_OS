@@ -1,30 +1,61 @@
 @import "tailwindcss";
 
 /*
- * AI Procurement OS — design tokens.
+ * AI Procurement OS — design tokens (E1.6). Plan and contrast ratios: ARCHITECTURE.md §6.
  *
- * Provisional set added in E1.3 so the auth pages use token names from the start.
- * E1.6 finalises the palette and adds the Phase 1 status colours (compliant,
- * expiring, expired, missing, conflict, needs verification, unable to verify).
- * Direction: CLAUDE.md §1.2 — quiet, neutral, colour reserved for meaning.
+ * Only problems get colour: compliant is ink on grey; red, amber and blue are kept
+ * for what needs a person. One accent (navy) for actions. No gradients or shadows.
  */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 
+  /* Surfaces, lines, text */
   --color-canvas: #f6f6f4;
   --color-surface: #ffffff;
   --color-surface-muted: #f0f0ed;
   --color-line: #d9d9d4;
+  --color-line-strong: #8f949b;
   --color-ink: #1b1e23;
   --color-ink-muted: #545a63;
-  --color-ink-subtle: #7b818a;
+  --color-ink-subtle: #6b7179;
 
+  /* The one accent */
   --color-accent: #1f3a5f;
   --color-accent-hover: #172c48;
   --color-accent-ink: #ffffff;
 
+  /* Form errors */
   --color-danger: #b42318;
   --color-danger-soft: #fdf1f0;
+
+  /* Phase 1 statuses: fg (text + icon), bg, line (border) */
+  --color-status-compliant-fg: #2c3138;
+  --color-status-compliant-bg: #eeeeea;
+  --color-status-compliant-line: #d9d9d4;
+
+  --color-status-expiring-fg: #7a4a00;
+  --color-status-expiring-bg: #fdf2d6;
+  --color-status-expiring-line: #f0d18a;
+
+  --color-status-expired-fg: #9f1d16;
+  --color-status-expired-bg: #fdecea;
+  --color-status-expired-line: #f3b8b2;
+
+  --color-status-missing-fg: #9f1d16;
+  --color-status-missing-bg: #ffffff;
+  --color-status-missing-line: #d9473d;
+
+  --color-status-conflict-fg: #8a2c0d;
+  --color-status-conflict-bg: #fdebe1;
+  --color-status-conflict-line: #f1b79b;
+
+  --color-status-verify-fg: #1c4a86;
+  --color-status-verify-bg: #e7effa;
+  --color-status-verify-line: #b5cbeb;
+
+  --color-status-unknown-fg: #4b515a;
+  --color-status-unknown-bg: #ffffff;
+  --color-status-unknown-line: #b9bcc2;
 }
 
 :root {

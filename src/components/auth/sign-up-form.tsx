@@ -18,7 +18,7 @@ export function SignUpForm() {
     return (
       <div className="flex flex-col gap-4">
         <FormMessage tone="info">{state.message}</FormMessage>
-        <Link href="/login" className="text-accent text-sm underline-offset-4 hover:underline">
+        <Link href="/login" className="text-sm text-accent underline-offset-4 hover:underline">
           Back to log in
         </Link>
       </div>
@@ -50,7 +50,7 @@ export function SignUpForm() {
         error={fieldErrors?.password}
       />
       <SubmitButton label="Create account" pendingLabel="Creating account…" />
-      <p className="text-ink-muted text-sm">
+      <p className="text-sm text-ink-muted">
         Already have an account?{" "}
         <Link href="/login" className="text-accent underline-offset-4 hover:underline">
           Log in

@@ -69,12 +69,14 @@ pgvector is not used in Phase 1.
 │   ├── app/              # Next.js App Router — routes, layouts, route handlers
 │   │   ├── (auth)/       # /login, /signup, /forgot-password, /reset-password, /onboarding
 │   │   ├── auth/callback/ # landing route for auth email links
-│   │   ├── globals.css   # Tailwind 4 @theme tokens (provisional; finalised in E1.6)
+│   │   ├── globals.css   # Tailwind 4 @theme design + status tokens (§6)
 │   │   ├── layout.tsx    # Root layout
 │   │   └── page.tsx      # Signed-in placeholder (replaced by app shell in E1.7/E1.8)
-│   ├── components/       # forms/ (Field, SubmitButton, FormMessage), auth/, workspace/
+│   ├── components/       # ui/ (StatusPill), forms/ (Field, SubmitButton…), auth/, workspace/
 │   └── lib/
+│       ├── audit/        # recordAuditEvent — the one audit write path
 │       ├── auth/         # Server Actions, Zod schemas, session helpers, path rules
+│       ├── compliance/   # status set (statuses.ts); engines arrive in E2.5/E4.1
 │       ├── workspace/    # membership (profile + organization), onboarding action
 │       ├── env/          # Zod-validated environment, split by trust boundary
 │       │   ├── public.ts # NEXT_PUBLIC_* — safe on both sides
@@ -159,13 +161,85 @@ is saved as _pending review_ and never constitutes an approval. Cost: roughly R5
 
 ## 6. Design Tokens
 
-_Pending E1.6._ The old prototype and its palette were removed. `src/app/globals.css`
-currently holds only a neutral base and the system font stack. E1.6 defines the token set
-following CLAUDE.md §1.2: neutral surfaces, one accent, and status tokens named for their
-meaning — `compliant`, `expiring`, `expired`, `missing`, `conflict`, `needs-verification`,
-`unable-to-verify` — plus a single `StatusPill` component.
+Written before any E1.6 code, per the `frontend-design` process, then built in
+`src/app/globals.css` and `src/components/ui/status-pill.tsx`.
 
----
+### Plan
+
+**Subject and job.** A South African supplier's tender team (owner, bid manager) checking
+whether their company documents meet a tender's returnables before the closing date. The
+screen's job is to make the _problems_ impossible to miss: what is missing, expired,
+certified too long ago or contradictory. Reference: a well-kept tender file and compliance
+register, not a marketing site. Monday-style structure (board, list, statuses, owners,
+deadlines) in a quieter key.
+
+**Principle: only problems get colour.** Compliant is the expected state, so it is drawn in
+ink with a check, not in green. Colour is spent on what needs a person: red for blocking
+gaps, amber for "soon", blue for "a person must look". Everything else is neutral. This is
+the one bold move; the rest stays disciplined.
+
+**Colour** (light only in Phase 1):
+
+| Token                              | Hex                               | Use                                                |
+| ---------------------------------- | --------------------------------- | -------------------------------------------------- |
+| `canvas`                           | `#f6f6f4`                         | page background (warm grey, not cream)             |
+| `surface` / `surface-muted`        | `#ffffff` / `#f0f0ed`             | panels, inputs / hover, quiet fills                |
+| `line` / `line-strong`             | `#d9d9d4` / `#8f949b`             | dividers / control borders (3:1 against white)     |
+| `ink` / `ink-muted` / `ink-subtle` | `#1b1e23` / `#545a63` / `#6b7179` | text: primary / secondary / hints (all ≥ 4.5:1)    |
+| `accent` (+ `-hover`, `-ink`)      | `#1f3a5f`                         | the one accent: primary buttons, links, focus ring |
+| `danger` / `danger-soft`           | `#b42318` / `#fdf1f0`             | form errors                                        |
+
+**Status set** (Phase 1). Each status has a foreground, background and border token, an
+icon and a label, so meaning never depends on colour alone. Every pair is ≥ 6.7:1.
+
+| Status               | Label              | Look                                    | Icon (Lucide)      | Group           |
+| -------------------- | ------------------ | --------------------------------------- | ------------------ | --------------- |
+| `compliant`          | Compliant          | ink on quiet grey                       | `CircleCheck`      | done            |
+| `expiring`           | Expiring soon      | amber `#7a4a00` on `#fdf2d6`            | `Clock`            | act soon        |
+| `expired`            | Expired            | red `#9f1d16` on `#fdecea`              | `CalendarX`        | blocking        |
+| `missing`            | Missing            | red on white, **dashed** border (empty) | `CircleDashed`     | blocking        |
+| `conflict`           | Conflict           | rust `#8a2c0d` on `#fdebe1`             | `GitCompareArrows` | blocking        |
+| `needs-verification` | Needs verification | blue `#1c4a86` on `#e7effa`             | `Eye`              | person to check |
+| `unable-to-verify`   | Unable to verify   | grey ink on white, grey border          | `CircleHelp`       | person to check |
+
+**Type.** The system UI stack (Segoe UI on the client's Windows machines, SF on Mac): a
+working tool should look native, load with no font request and no layout shift (decision
+log #4, reconfirmed). Scale 12 / 13 / 14 / 16 / 20 / 24 px; body 14 px, because tables and
+lists are dense. Weights 400 / 500 / 600 only. Dates, counts and reference numbers use
+`tabular-nums`. Sentence case everywhere; no all-caps labels, no eyebrows.
+
+**Shape.** Radius 6 px on controls and panels, 4 px on status tags: tags read as labels
+stamped on a row, not as round pills. Borders instead of shadows. No gradients, glows or
+decorative motion; the only motion is feedback to an action.
+
+**Layout** (built in E1.7/E1.8). Left-aligned throughout.
+
+```
+desktop ≥ 1024px                         phone 390px
+┌──────────┬───────────────────────────┐ ┌─────────────────────────┐
+│ Company  │ Page title        [user ▾]│ │ ☰  Page title   [user]  │
+│          ├───────────────────────────┤ ├─────────────────────────┤
+│ Dashboard│                           │ │ content, one column     │
+│ Tenders  │ content (max ~1120px)     │ │ tables become stacked   │
+│ Company  │ tables and lists, not     │ │ rows                    │
+│ documents│ card grids                │ │                         │
+│ Settings │                           │ │ (nav opens as a drawer) │
+└──────────┴───────────────────────────┘ └─────────────────────────┘
+```
+
+**Review against the brief.** First draft: a green "compliant" pill and full-round pills
+in a row of soft cards. That is the generic SaaS-status default and breaks the "no green"
+rule, so it was changed to the ink-and-check compliant state, square-ish tags, and lists
+over cards. Cream canvas with a serif display was also considered and rejected as a known
+AI-generated look; the warm grey canvas is a deliberate step away from it.
+
+### Built
+
+- Tokens: `@theme` in `src/app/globals.css` (Tailwind 4 generates `bg-*`, `text-*`,
+  `border-*` utilities from them, e.g. `bg-status-expired-bg`).
+- `StatusPill` (`src/components/ui/status-pill.tsx`): `<StatusPill status="expired" />`.
+  The status list and labels live in `src/lib/compliance/statuses.ts`, so E2.5's expiry
+  engine and E4.1's matching engine return the same values the pill renders.
 
 ## 7. Supabase Client Topology
 
@@ -454,7 +528,7 @@ Phase 1; the booklet's larger role set is a later-phase decision.
 | 1   | Next.js app at repo root, not a monorepo                               | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                |
 | 2   | PDF extraction via Next.js Route Handlers, not a Python service        | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.  |
 | 3   | Anthropic over OpenAI                                                  | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                 |
-| 4   | System font stack, not Geist                                           | No build-time font fetch. Revisited in E1.6 when the design system is defined.                                                                          |
+| 4   | System font stack, not Geist                                           | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.     |
 | 5   | RLS as the tenancy enforcement point                                   | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                            |
 | 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)        | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                            |
 | 7   | Three separate Supabase clients rather than one configurable factory   | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site. |

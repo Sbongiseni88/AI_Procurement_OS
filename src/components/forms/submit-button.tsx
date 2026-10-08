@@ -10,7 +10,7 @@ export function SubmitButton({ label, pendingLabel }: { label: string; pendingLa
       type="submit"
       disabled={pending}
       aria-disabled={pending}
-      className="bg-accent text-accent-ink hover:bg-accent-hover focus-visible:outline-accent h-10 rounded-md px-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-progress disabled:opacity-70"
+      className="h-10 rounded-md bg-accent px-4 text-sm font-medium text-accent-ink hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-progress disabled:opacity-70"
     >
       {pending ? pendingLabel : label}
     </button>

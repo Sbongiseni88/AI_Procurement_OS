@@ -22,11 +22,11 @@ export default async function OnboardingPage() {
       />
       <OnboardingForm />
       {/* Guest pages redirect signed-in people here, so this is the only way out. */}
-      <form action={logOut} className="text-ink-muted text-sm">
+      <form action={logOut} className="text-sm text-ink-muted">
         Not {user.email}?{" "}
         <button
           type="submit"
-          className="text-accent focus-visible:outline-accent underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="text-accent underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           Log out
         </button>
