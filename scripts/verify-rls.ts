@@ -61,7 +61,7 @@ async function signIn(email: string): Promise<SupabaseClient> {
   return client;
 }
 
-type Role = "bid_manager" | "pricing_specialist" | "executive_approver";
+type Role = "bid_manager" | "pricing_specialist" | "executive_approver" | "viewer";
 
 async function main(): Promise<void> {
   const created = { userIds: [] as string[], orgIds: [] as string[] };
@@ -205,6 +205,33 @@ async function main(): Promise<void> {
       "pricing_specialist may NOT update its own organization",
       bOwnOrgUpdate.error !== null || bOwnOrgUpdate.data?.length === 0,
       `affected ${bOwnOrgUpdate.data?.length ?? 0} rows`,
+    );
+
+    // E1.5.3: the read-only viewer reads its company like any member, and the database
+    // refuses its writes even if the app's permission check had a bug.
+    const emailV = `rls-v-${RUN}@example.com`;
+    await createPerson(emailV, [[orgA.id, "viewer"]]);
+    const v = await signIn(emailV);
+    const vOrgs = await v.from("organizations").select("id");
+    const vEvents = await v.from("audit_events").select("organization_id");
+    check(
+      "viewer reads its own company, and only its company's audit events",
+      !vOrgs.error &&
+        vOrgs.data.length === 1 &&
+        vOrgs.data[0]?.id === orgA.id &&
+        !vEvents.error &&
+        vEvents.data.every((e) => e.organization_id === orgA.id),
+      vOrgs.error?.message ?? `got ${vOrgs.data?.length} rows`,
+    );
+    const vUpdate = await v
+      .from("organizations")
+      .update({ name: `Alpha renamed by viewer ${RUN}` })
+      .eq("id", orgA.id)
+      .select("id");
+    check(
+      "viewer may NOT update its own organization",
+      vUpdate.error !== null || vUpdate.data?.length === 0,
+      `affected ${vUpdate.data?.length ?? 0} rows`,
     );
 
     // ---- Onboarding (E1.4) ---------------------------------------------------

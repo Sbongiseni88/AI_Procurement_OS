@@ -205,7 +205,11 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "bid_manager" | "pricing_specialist" | "executive_approver"
+      app_role:
+        | "bid_manager"
+        | "pricing_specialist"
+        | "executive_approver"
+        | "viewer"
       membership_status: "invited" | "active" | "removed"
     }
     CompositeTypes: {
@@ -337,7 +341,12 @@ export const Constants = {
   },
   public: {
     Enums: {
-      app_role: ["bid_manager", "pricing_specialist", "executive_approver"],
+      app_role: [
+        "bid_manager",
+        "pricing_specialist",
+        "executive_approver",
+        "viewer",
+      ],
       membership_status: ["invited", "active", "removed"],
     },
   },

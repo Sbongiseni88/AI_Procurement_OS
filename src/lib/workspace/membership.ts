@@ -3,17 +3,15 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
+import { type Action, type AppRole, can } from "@/lib/auth/permissions";
 import { requireUser } from "@/lib/auth/session";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { type Database } from "@/lib/supabase/database.types";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export type AppRole = Database["public"]["Enums"]["app_role"];
-
-export const ROLE_LABELS: Record<AppRole, string> = {
-  bid_manager: "Bid manager",
-  pricing_specialist: "Pricing specialist",
-  executive_approver: "Executive approver",
-};
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+/** Compile-time check: the matrix's roles are exactly the database's `app_role` values. */
+export type RolesMatchDatabase = Assert<Same<AppRole, Database["public"]["Enums"]["app_role"]>>;
 
 /** The signed-in person in their company workspace. */
 export type Membership = {
@@ -73,5 +71,24 @@ export async function hasProfile(): Promise<boolean> {
 export async function requireMembership(): Promise<Membership> {
   const membership = await getMembership();
   if (membership === null) redirect("/onboarding");
+  return membership;
+}
+
+/** Thrown when the signed-in person's role does not allow an action. */
+export class PermissionDeniedError extends Error {
+  constructor(readonly action: Action) {
+    super(`Your role does not allow this action (${action}).`);
+    this.name = "PermissionDeniedError";
+  }
+}
+
+/**
+ * For every server action and server helper that writes: the active membership, if
+ * its role may perform `action` (permission matrix, `src/lib/auth/permissions.ts`).
+ * Throws PermissionDeniedError otherwise; callers turn it into a plain-language message.
+ */
+export async function requirePermission(action: Action): Promise<Membership> {
+  const membership = await requireMembership();
+  if (!can(membership.role, action)) throw new PermissionDeniedError(action);
   return membership;
 }

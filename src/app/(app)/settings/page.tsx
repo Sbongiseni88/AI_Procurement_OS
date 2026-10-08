@@ -1,7 +1,8 @@
 import { type Metadata } from "next";
 
 import { PageHeader } from "@/components/shell/page-header";
-import { requireMembership, ROLE_LABELS } from "@/lib/workspace/membership";
+import { ROLE_LABELS } from "@/lib/auth/permissions";
+import { requireMembership } from "@/lib/workspace/membership";
 
 export const metadata: Metadata = { title: "Settings" };
 

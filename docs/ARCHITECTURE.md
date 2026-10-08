@@ -63,13 +63,13 @@ graph TB
 Inside the app, Server Components are the read path, Server Actions the write path, and
 Route Handlers are used only for uploads, the job runner and AI work where needed.
 
-| Platform core part                  | Status                                                                                          |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Companies, memberships, permissions | Companies, three roles and memberships **built** (T1.3, E1.4, E1.5.2); permission matrix E1.5.3 |
-| Documents and versions              | Planned, E1.5.4                                                                                 |
-| Audit log and domain events         | Audit log **built** (E1, ticket E1.5); domain events E1.5.5                                     |
-| Jobs and job runner                 | Planned, E1.5.5                                                                                 |
-| AI gateway                          | Planned, E1.5.6                                                                                 |
+| Platform core part                  | Status                                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------------------------- |
+| Companies, memberships, permissions | Companies, memberships and the permission matrix **built** (T1.3, E1.4, E1.5.2, E1.5.3) |
+| Documents and versions              | Planned, E1.5.4                                                                         |
+| Audit log and domain events         | Audit log **built** (E1, ticket E1.5); domain events E1.5.5                             |
+| Jobs and job runner                 | Planned, E1.5.5                                                                         |
+| AI gateway                          | Planned, E1.5.6                                                                         |
 
 **Trust boundary:** every database read and write crosses RLS. `auth.uid()` and the
 caller's `organization_id` are the only tenancy discriminators — the application layer
@@ -133,7 +133,7 @@ decision is a person's, and is logged. pgvector is not used in Phase 1.
 └── public/               # Static assets
 ```
 
-Planned in E1.5: `src/lib/auth/permissions.ts` (permission matrix, E1.5.3),
+Built in E1.5: `src/lib/auth/permissions.ts` (permission matrix, E1.5.3). Planned in E1.5:
 `src/lib/documents/` (documents and versions, E1.5.4), `src/lib/jobs/` (domain events,
 jobs and the job runner, E1.5.5), `src/lib/ai/` (AI gateway, E1.5.6).
 
@@ -477,6 +477,7 @@ Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 | `20261008153917_memberships`                        | E1.5.2  | `memberships`, `membership_status`, `profiles.active_organization_id`, backfill from profiles   |
 | `20261008154447_access_follows_active_membership`   | E1.5.2  | helpers in `private` read the active membership; every policy re-pointed; `switch_organization` |
 | `20261008154918_drop_profile_company_and_role`      | E1.5.2  | drops `profiles.organization_id` and `profiles.role`; profile guard now on the selection        |
+| `20261008160107_viewer_role`                        | E1.5.3  | `viewer` added to `app_role`                                                                    |
 
 ```mermaid
 erDiagram
@@ -534,7 +535,8 @@ erDiagram
 
 `organizations` is the tenant root. `profiles` is the person, 1:1 with `auth.users`.
 `memberships` binds a person to a company with a role (`app_role`:
-`bid_manager | pricing_specialist | executive_approver`) and a status (`invited | active |
+`executive_approver | bid_manager | pricing_specialist | viewer`; what each may do is in
+Permissions below) and a status (`invited | active |
 removed`); it is unique per company and person. Only `active` memberships give access. A
 membership ends by status `removed`, never by deletion (no `DELETE` privilege, even for the
 service role); rows go only when their person or company is deleted.
@@ -623,6 +625,54 @@ Both return NULL when the caller has no active membership, so every policy **fai
 Policies wrap them as `(select fn())` rather than `fn()`, so Postgres evaluates them once per
 statement as an InitPlan instead of once per row.
 
+### Permissions (E1.5.3)
+
+One matrix, `src/lib/auth/permissions.ts`, says which role may do what in every module
+(Architecture rule 3). It is pure code with no imports, unit-tested in
+`tests/unit/permissions.test.ts`.
+
+| Action                | Executive approver | Bid manager | Pricing specialist | Viewer |
+| --------------------- | :----------------: | :---------: | :----------------: | :----: |
+| `documents.upload`    |         ✓          |      ✓      |         ✓          |        |
+| `documents.review`    |         ✓          |      ✓      |                    |        |
+| `tenders.create`      |         ✓          |      ✓      |                    |        |
+| `tenders.review`      |         ✓          |      ✓      |                    |        |
+| `requirements.decide` |         ✓          |      ✓      |                    |        |
+| `members.manage`      |         ✓          |             |                    |        |
+| `settings.edit`       |         ✓          |      ✓      |                    |        |
+| `audit.view`          |         ✓          |      ✓      |         ✓          |   ✓    |
+
+Every role reads its active company's data; the matrix governs what they may change.
+
+**Where it is enforced.**
+
+1. **Server actions and server helpers** call `requirePermission(action)`
+   (`src/lib/workspace/membership.ts`) before writing. It returns the active membership or
+   throws `PermissionDeniedError`, which the caller turns into a plain-language message.
+   Screens may call `can(role, action)` to hide what a person cannot do, but hiding is never
+   the check.
+2. **RLS** still enforces tenancy for everyone and the sensitive writes: users have no
+   write privileges on memberships, audit events, document versions and the like, and the
+   one user-writable business table (`organizations`) repeats the `settings.edit` roles in
+   its policy. A unit test fails if the matrix and that policy's role list drift apart.
+3. **Types.** `membership.ts` does not compile if `APP_ROLES` and the database's
+   `app_role` enum differ.
+
+No action needs a role check yet (the settings page is read-only and onboarding happens
+before a person has a role); E1.5.4's upload helper is the first caller of
+`requirePermission`.
+
+**Adding a booklet role later** (e.g. compliance officer, finance, supplier contact):
+
+1. A migration: `alter type public.app_role add value '<role>'`, then `npm run db:types`.
+2. `permissions.ts`: add it to `APP_ROLES` and `ROLE_LABELS`, and give it a row in `MATRIX`.
+   New module actions are added to `ACTIONS` and to the rows of the roles that may do them.
+3. If the role may make one of the writes a policy restricts by role, add it to that
+   policy's role list in the same migration, and to the sync test.
+4. Unit tests for the new row; `verify:rls` for any policy change.
+
+No screen or action changes: they already ask the matrix.
+
 ### Onboarding (E1.4, membership since E1.5.2)
 
 A new sign-up has no membership, so every policy returns nothing for them (fail closed). The
@@ -700,9 +750,8 @@ permissive about those, so a typo there fails at runtime, not compile time.
 ### Not yet built
 
 Every planned table in "Phase 1 tables" above is added with RLS and `verify:rls` coverage
-in its own ticket. The three roles (`bid_manager`, `pricing_specialist`,
-`executive_approver`) stay for Phase 1; E1.5.3 adds a read-only `viewer` and the permission
-matrix that later booklet roles are added to.
+in its own ticket. Phase 1 has four roles; the booklet's other roles are added to the
+permission matrix when their modules need them (Permissions, above).
 
 ## 9. Pipelines
 
@@ -776,43 +825,44 @@ What Phase 1 builds and which later modules reuse it.
 
 ## 13. Decision Log
 
-| #   | Decision                                                                | Rationale                                                                                                                                                                                                              |
-| --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Next.js app at repo root, not a monorepo                                | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                                                                               |
-| 2   | PDF extraction via Next.js Route Handlers, not a Python service         | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.                                                                 |
-| 3   | Anthropic over OpenAI                                                   | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                                                                                |
-| 4   | System font stack, not Geist                                            | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.                                                                    |
-| 5   | RLS as the tenancy enforcement point                                    | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                                                                                           |
-| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)         | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                                                                                           |
-| 7   | Three separate Supabase clients rather than one configurable factory    | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site.                                                                |
-| 8   | Env validated with Zod at import time, split by trust boundary          | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                                                                               |
-| 9   | `Database` type is a committed placeholder until T1.3                   | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.                                                                       |
-| 10  | `profiles.organization_id` NOT NULL                                     | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                                                                                        |
-| 11  | INSERT/DELETE denied to all user roles on both tables                   | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                                                                                     |
-| 12  | Anti-escalation duplicated across column GRANTs and a trigger           | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                                                                                            |
-| 13  | Phase 1 scoped to tender compliance                                     | Client's booklet has 45 builds; the quote covered five milestones ending 13 Nov 2026 (now 18 Nov, with Milestone 1.5; see #26). Later stages are in §11.                                                               |
-| 14  | Old static prototype deleted; UI designed fresh                         | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                                                                                         |
-| 15  | Client's earlier Python/FastAPI builds not used                         | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.                                                                        |
-| 16  | Compliance matching is deterministic code, not AI                       | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                                                                                           |
-| 17  | Claude Opus 5.5 through a single AI gateway                             | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                                                                                  |
-| 18  | Third-party Claude skills vendored into `.claude/skills/`               | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                                                                                |
-| 19  | E2E suite runs against `next build && next start`, not `next dev`       | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                                                                                              |
-| 20  | Tests create users with the admin API (`createUser`, `generateLink`)    | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.                                                                          |
-| 21  | Password reset only from a fresh email-link session                     | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                                                                                        |
-| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public`  | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.                                                                             |
-| 23  | Workspace creator becomes `executive_approver`                          | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                                                                                       |
-| 24  | Audit events written by the service role through one helper             | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                                                                                       |
-| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade   | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                                                                                       |
-| 26  | Phase 1 is the first production module on a shared platform core        | Client requirement of 8 Oct 2026. Pricing, suppliers, submissions and agents must plug into one database, login, document store, audit trail, AI gateway and task engine instead of being rebuilt. Adds Milestone 1.5. |
-| 27  | Tenancy through `memberships`, not a company stored on the profile      | A consultant or group director can belong to several companies; adding a company becomes data, not code. Access follows the active membership (E1.5.2).                                                                |
-| 28  | One permission matrix in code; RLS keeps tenancy and sensitive writes   | Booklet roles are added to one table, not to every screen. The database still refuses cross-company access and forged writes if the app has a bug.                                                                     |
-| 29  | Files only as `documents` with immutable, SHA-256-hashed versions       | Evidence must be provable later (submission locks, disputes): the original is never overwritten or deleted, and the hash shows it is unchanged.                                                                        |
-| 30  | Background work in a Postgres `jobs` table with a job runner route      | No queue service to host or pay for. Claimed with `FOR UPDATE SKIP LOCKED`; future AI agents are new job types. Revisit if volume outgrows it.                                                                         |
-| 31  | Provider-neutral AI gateway; Claude is the first adapter                | Another provider is a new adapter, not a rewrite. One place logs model, tokens, cost and time in `ai_runs` (supersedes the single-provider wording of #17).                                                            |
-| 32  | Rules only from the tender; no default certification period             | Correction to the quote: age limits apply only when a tender states them, stored with page and quote. A silent tender applies no limit.                                                                                |
-| 33  | Archive, don't delete                                                   | Business records and evidence history are archived (`archived_at`), never hard-deleted, so past bids stay explainable.                                                                                                 |
-| 34  | Future-module tables designed now, created with their module            | The entity map (§10) keeps Phase 1 compatible with the full platform without carrying empty tables, migrations and RLS for features not yet built.                                                                     |
-| 35  | Active company: stored selection, validated against active memberships  | Access must never come from a value stored on the person. The helper uses the selection only to choose among active memberships (else oldest, else none), so a stale or forged value grants nothing.                   |
-| 36  | Session helpers in `private`, not `public`                              | In `public` they were API endpoints (`/rest/v1/rpc/…`) callable even by `anon`; the advisors flagged them. Policies still call them as the signed-in user.                                                             |
-| 37  | Memberships end by status `removed`; no DELETE grant, even service role | Archive, don't delete: who was a member, with which role, stays explainable. Cascades from deleting a person or company still remove rows.                                                                             |
-| 38  | Co-members cannot read a person's selected company                      | It would reveal another company that person belongs to (competing bidders). Column-level `SELECT` on `profiles`; `select *` on profiles now fails for users.                                                           |
+| #   | Decision                                                                | Rationale                                                                                                                                                                                                                          |
+| --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Next.js app at repo root, not a monorepo                                | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                                                                                           |
+| 2   | PDF extraction via Next.js Route Handlers, not a Python service         | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.                                                                             |
+| 3   | Anthropic over OpenAI                                                   | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                                                                                            |
+| 4   | System font stack, not Geist                                            | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.                                                                                |
+| 5   | RLS as the tenancy enforcement point                                    | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                                                                                                       |
+| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)         | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                                                                                                       |
+| 7   | Three separate Supabase clients rather than one configurable factory    | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site.                                                                            |
+| 8   | Env validated with Zod at import time, split by trust boundary          | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                                                                                           |
+| 9   | `Database` type is a committed placeholder until T1.3                   | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.                                                                                   |
+| 10  | `profiles.organization_id` NOT NULL                                     | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                                                                                                    |
+| 11  | INSERT/DELETE denied to all user roles on both tables                   | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                                                                                                 |
+| 12  | Anti-escalation duplicated across column GRANTs and a trigger           | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                                                                                                        |
+| 13  | Phase 1 scoped to tender compliance                                     | Client's booklet has 45 builds; the quote covered five milestones ending 13 Nov 2026 (now 18 Nov, with Milestone 1.5; see #26). Later stages are in §11.                                                                           |
+| 14  | Old static prototype deleted; UI designed fresh                         | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                                                                                                     |
+| 15  | Client's earlier Python/FastAPI builds not used                         | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.                                                                                    |
+| 16  | Compliance matching is deterministic code, not AI                       | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                                                                                                       |
+| 17  | Claude Opus 5.5 through a single AI gateway                             | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                                                                                              |
+| 18  | Third-party Claude skills vendored into `.claude/skills/`               | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                                                                                            |
+| 19  | E2E suite runs against `next build && next start`, not `next dev`       | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                                                                                                          |
+| 20  | Tests create users with the admin API (`createUser`, `generateLink`)    | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.                                                                                      |
+| 21  | Password reset only from a fresh email-link session                     | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                                                                                                    |
+| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public`  | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.                                                                                         |
+| 23  | Workspace creator becomes `executive_approver`                          | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                                                                                                   |
+| 24  | Audit events written by the service role through one helper             | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                                                                                                   |
+| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade   | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                                                                                                   |
+| 26  | Phase 1 is the first production module on a shared platform core        | Client requirement of 8 Oct 2026. Pricing, suppliers, submissions and agents must plug into one database, login, document store, audit trail, AI gateway and task engine instead of being rebuilt. Adds Milestone 1.5.             |
+| 27  | Tenancy through `memberships`, not a company stored on the profile      | A consultant or group director can belong to several companies; adding a company becomes data, not code. Access follows the active membership (E1.5.2).                                                                            |
+| 28  | One permission matrix in code; RLS keeps tenancy and sensitive writes   | Booklet roles are added to one table, not to every screen. The database still refuses cross-company access and forged writes if the app has a bug.                                                                                 |
+| 29  | Files only as `documents` with immutable, SHA-256-hashed versions       | Evidence must be provable later (submission locks, disputes): the original is never overwritten or deleted, and the hash shows it is unchanged.                                                                                    |
+| 30  | Background work in a Postgres `jobs` table with a job runner route      | No queue service to host or pay for. Claimed with `FOR UPDATE SKIP LOCKED`; future AI agents are new job types. Revisit if volume outgrows it.                                                                                     |
+| 31  | Provider-neutral AI gateway; Claude is the first adapter                | Another provider is a new adapter, not a rewrite. One place logs model, tokens, cost and time in `ai_runs` (supersedes the single-provider wording of #17).                                                                        |
+| 32  | Rules only from the tender; no default certification period             | Correction to the quote: age limits apply only when a tender states them, stored with page and quote. A silent tender applies no limit.                                                                                            |
+| 33  | Archive, don't delete                                                   | Business records and evidence history are archived (`archived_at`), never hard-deleted, so past bids stay explainable.                                                                                                             |
+| 34  | Future-module tables designed now, created with their module            | The entity map (§10) keeps Phase 1 compatible with the full platform without carrying empty tables, migrations and RLS for features not yet built.                                                                                 |
+| 35  | Active company: stored selection, validated against active memberships  | Access must never come from a value stored on the person. The helper uses the selection only to choose among active memberships (else oldest, else none), so a stale or forged value grants nothing.                               |
+| 36  | Session helpers in `private`, not `public`                              | In `public` they were API endpoints (`/rest/v1/rpc/…`) callable even by `anon`; the advisors flagged them. Policies still call them as the signed-in user.                                                                         |
+| 37  | Memberships end by status `removed`; no DELETE grant, even service role | Archive, don't delete: who was a member, with which role, stays explainable. Cascades from deleting a person or company still remove rows.                                                                                         |
+| 38  | Co-members cannot read a person's selected company                      | It would reveal another company that person belongs to (competing bidders). Column-level `SELECT` on `profiles`; `select *` on profiles now fails for users.                                                                       |
+| 39  | Permission matrix as typed code, not a database table                   | One reviewed place, checked by the compiler and unit tests, read without a query. Roles live in the `app_role` enum; a test keeps the one role-listing policy in sync. A table can come with configurable roles in the SaaS stage. |

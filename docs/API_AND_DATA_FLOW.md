@@ -25,6 +25,12 @@ These rules apply to every entry added below.
    to `AUDIT_ACTION_NAMES` there. The helper sets organization and actor itself; never pass
    them in. Logged so far: `workspace.created` (details: `organizationName`, `role`).
 
+7. **Every write checks the permission matrix first.** A Server Action or server helper
+   that writes calls `requirePermission(action)` (`src/lib/workspace/membership.ts`), which
+   returns the active membership or throws `PermissionDeniedError`; turn that into a
+   plain-language message. Actions are listed in `src/lib/auth/permissions.ts` (ARCHITECTURE.md
+   §8, Permissions). The organization always comes from the returned membership.
+
 ## Client Selection
 
 Before adding an entry below, pick the right Supabase client (see ARCHITECTURE.md §7):

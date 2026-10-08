@@ -1,7 +1,8 @@
 import { ChevronDown } from "lucide-react";
 
 import { logOut } from "@/lib/auth/actions";
-import { type Membership, ROLE_LABELS } from "@/lib/workspace/membership";
+import { ROLE_LABELS } from "@/lib/auth/permissions";
+import { type Membership } from "@/lib/workspace/membership";
 
 import { PopoverLink } from "./popover-link";
 

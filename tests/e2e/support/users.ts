@@ -60,7 +60,13 @@ export async function createMember(label = "member"): Promise<TestMember> {
   if (org.error || typeof organizationId !== "string") {
     throw new Error(`organization insert failed: ${org.error?.message}`);
   }
-  const user = await createConfirmedUser(label);
+  let user: TestUser;
+  try {
+    user = await createConfirmedUser(label);
+  } catch (error: unknown) {
+    await deleteOrganization(organizationId);
+    throw error;
+  }
   const profile = await admin.from("profiles").insert({
     id: user.id,
     full_name: "E2E Member",
