@@ -300,7 +300,7 @@ test.describe("document store", () => {
     expect(again.status).toBe("stored");
   });
 
-  test("every stored version has its audit entry, written with it", async () => {
+  test("every stored version has its audit entry and domain event, written with it", async () => {
     const organizationId = await createCompany();
     companies.push(organizationId);
     const actor = { organizationId, userId: randomUUID() };
@@ -332,5 +332,19 @@ test.describe("document store", () => {
     ]);
     // The file name can carry an ID number, so it is never in the audit log.
     expect(JSON.stringify(events.data)).not.toContain("8001015009087");
+
+    // The same transaction records the domain event (E1.5.5).
+    const domainEvents = await db
+      .from("domain_events")
+      .select("type, entity_type, entity_id, actor_id")
+      .eq("organization_id", organizationId);
+    expect(domainEvents.data).toEqual([
+      {
+        type: "document.uploaded",
+        entity_type: "document",
+        entity_id: stored.version.documentId,
+        actor_id: actor.userId,
+      },
+    ]);
   });
 });

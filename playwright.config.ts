@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 
 import { defineConfig, devices } from "@playwright/test";
@@ -18,6 +19,13 @@ if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 
 const PORT = 3100;
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
+
+// The job runner route refuses requests without CRON_SECRET (E1.5.5). The local test
+// server gets a fresh one per run, shared with the tests through the environment.
+// Against a deployment, tests that call the runner are skipped unless it is exported.
+if (externalBaseUrl === undefined && !process.env.CRON_SECRET) {
+  process.env.CRON_SECRET = randomBytes(24).toString("hex");
+}
 
 export default defineConfig({
   testDir: "./tests/e2e",

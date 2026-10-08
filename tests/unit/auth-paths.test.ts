@@ -41,6 +41,12 @@ describe("route access", () => {
     assert.ok(!isPublicPath("/reset-password"));
   });
 
+  it("lets the job runner through without a session (it checks its own secret)", () => {
+    assert.ok(isPublicPath("/api/jobs/run"));
+    assert.ok(!isGuestOnlyPath("/api/jobs/run"));
+    assert.ok(!isPublicPath("/api/jobs"));
+  });
+
   it("treats the reset-password page as signed-in only", () => {
     assert.ok(!isGuestOnlyPath("/reset-password"));
     assert.ok(isGuestOnlyPath("/forgot-password"));

@@ -14,10 +14,19 @@ const ServerEnvSchema = z.object({
   SUPABASE_SECRET_KEY: z.string().min(1).startsWith("sb_secret_", {
     error: "SUPABASE_SECRET_KEY must start with 'sb_secret_'.",
   }),
+  /**
+   * Protects the job runner route (E1.5.5); Vercel Cron sends it as
+   * `Authorization: Bearer <value>`. Optional so the app builds and runs without it:
+   * the route then refuses every request, and jobs still run after each enqueue.
+   * Checked by the route itself (at least 16 characters), not here, so a bad value
+   * disables the runner instead of the whole app.
+   */
+  CRON_SECRET: z.string().optional(),
 });
 
 const parsed = ServerEnvSchema.safeParse({
   SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
+  CRON_SECRET: process.env.CRON_SECRET,
 });
 
 if (!parsed.success) {

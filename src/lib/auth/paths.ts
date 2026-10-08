@@ -6,8 +6,15 @@
 /** Pages only a signed-out visitor needs. A signed-in visitor is sent on to the app. */
 const GUEST_ONLY_PATHS: ReadonlySet<string> = new Set(["/login", "/signup", "/forgot-password"]);
 
-/** Reachable without a session: the guest pages plus the email-link landing route. */
-const PUBLIC_PATHS: ReadonlySet<string> = new Set([...GUEST_ONLY_PATHS, "/auth/callback"]);
+/**
+ * Reachable without a session: the guest pages, the email-link landing route, and the
+ * job runner, which Vercel Cron calls with its own secret instead of a session.
+ */
+const PUBLIC_PATHS: ReadonlySet<string> = new Set([
+  ...GUEST_ONLY_PATHS,
+  "/auth/callback",
+  "/api/jobs/run",
+]);
 
 export function isGuestOnlyPath(pathname: string): boolean {
   return GUEST_ONLY_PATHS.has(pathname);

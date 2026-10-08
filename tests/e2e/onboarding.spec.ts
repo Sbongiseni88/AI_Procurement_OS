@@ -45,6 +45,20 @@ test("sign up, confirm the email, set up the workspace, land in it", async ({ pa
     });
     expect(event?.entity_id).toBe(event?.organization_id);
 
+    // ...and recorded as a domain event (E1.5.5), for jobs and future agents.
+    const { data: domainEvents } = await adminClient()
+      .from("domain_events")
+      .select("type, entity_type, entity_id, actor_id")
+      .eq("organization_id", event?.organization_id ?? "");
+    expect(domainEvents).toEqual([
+      {
+        type: "workspace.created",
+        entity_type: "organization",
+        entity_id: event?.organization_id,
+        actor_id: userId,
+      },
+    ]);
+
     // Onboarding is done once: going back to it returns to the workspace.
     await page.goto("/onboarding");
     await expect(page).toHaveURL(/\/$/);

@@ -5,8 +5,19 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { recordAuditEvent } from "@/lib/audit/record";
 import { fieldErrorsOf } from "@/lib/auth/schemas";
 import { requireUser } from "@/lib/auth/session";
+import { recordDomainEvent } from "@/lib/jobs/events";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { type OnboardingFormState, OnboardingSchema } from "@/lib/workspace/schemas";
+
+async function bestEffort(write: () => Promise<unknown>): Promise<void> {
+  try {
+    await write();
+  } catch (error: unknown) {
+    // Let Next's own control flow (redirect, notFound) through untouched.
+    unstable_rethrow(error);
+    console.error(error instanceof Error ? error.message : "a workspace record was not written");
+  }
+}
 
 /**
  * Creates the company workspace and the caller's profile in one database call
@@ -49,21 +60,20 @@ export async function completeOnboarding(
     };
   }
 
-  try {
-    await recordAuditEvent({
+  // The workspace exists either way, and failing here would strand the person on a
+  // page that now redirects them away, so a failed write is logged instead.
+  // Trade-off (ARCHITECTURE.md §8): workspace, audit entry and domain event are
+  // separate writes, so a database failure between them loses that one record.
+  await bestEffort(() =>
+    recordAuditEvent({
       action: "workspace.created",
       entityId: organizationId,
       details: { organizationName: parsed.data.companyName, role: "executive_approver" },
-    });
-  } catch (auditError: unknown) {
-    // Let Next's own control flow (redirect, notFound) through untouched.
-    unstable_rethrow(auditError);
-    // The workspace exists either way, and failing here would strand the person on a
-    // page that now redirects them away. Record the miss in the server log instead.
-    // Trade-off (ARCHITECTURE.md §8): workspace and event are two writes, not one
-    // transaction, so a database failure between them loses this one event.
-    console.error(auditError instanceof Error ? auditError.message : "audit write failed");
-  }
+    }),
+  );
+  await bestEffort(() =>
+    recordDomainEvent({ type: "workspace.created", entityId: organizationId }),
+  );
 
   redirect("/");
 }

@@ -1,6 +1,7 @@
 /**
  * RLS verification (T1.3, extended per ticket: E1.4 onboarding, E1.5 audit log,
- * E1.5.2 memberships, E1.5.3 viewer, E1.5.4 documents and file storage).
+ * E1.5.2 memberships, E1.5.3 viewer, E1.5.4 documents and file storage, E1.5.5 domain
+ * events and jobs).
  *
  * `tsc` cannot test SQL, so tenant isolation has to be proven against a real
  * database. This script provisions two organizations with one user each, then
@@ -16,6 +17,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -648,6 +650,105 @@ async function main(): Promise<void> {
       `upload: ${ownUpload.error ? "blocked" : "ALLOWED"}; upsert: ${ownOverwrite.error ? "blocked" : "ALLOWED"}; file ${aAfter === null ? "GONE" : "present"}`,
     );
 
+    // ---- Domain events and jobs (E1.5.5) -------------------------------------
+    console.log("\nDomain events and jobs:");
+    async function seedEventWithJob(orgId: string) {
+      const r = await admin
+        .rpc("record_domain_event", {
+          p_organization_id: orgId,
+          p_type: "workspace.created",
+          p_entity_type: "organization",
+          p_entity_id: orgId,
+          p_payload: {},
+          p_actor_id: null,
+          p_job_type: "ping",
+          p_job_payload: {},
+          p_job_max_attempts: 1,
+        })
+        .single();
+      if (r.error) throw new Error(`event seed failed: ${r.error.message}`);
+      const seeded = z.object({ event_id: z.number(), job_id: z.uuid() }).parse(r.data);
+      return { eventId: seeded.event_id, jobId: seeded.job_id };
+    }
+    const seedA = await seedEventWithJob(orgA.id);
+    const seedB = await seedEventWithJob(orgB.id);
+
+    const aDomainEvents = await a
+      .from("domain_events")
+      .select("id, organization_id, type, entity_id");
+    const aJobs = await a.from("jobs").select("id, organization_id, event_id");
+    check(
+      "a member reads its own company's domain events and jobs only",
+      !aDomainEvents.error &&
+        aDomainEvents.data.some((e) => e.id === seedA.eventId) &&
+        aDomainEvents.data.every((e) => e.organization_id === orgA.id) &&
+        !aJobs.error &&
+        aJobs.data.some((j) => j.id === seedA.jobId && j.event_id === seedA.eventId) &&
+        aJobs.data.every((j) => j.organization_id === orgA.id),
+      aDomainEvents.error?.message ??
+        aJobs.error?.message ??
+        `events=${aDomainEvents.data?.length}`,
+    );
+    check(
+      "storing a document version also recorded its document.uploaded domain event",
+      aDomainEvents.data?.some(
+        (e) => e.type === "document.uploaded" && e.entity_id === docA.documentId,
+      ) === true,
+      `types: ${aDomainEvents.data?.map((e) => e.type).join(",")}`,
+    );
+
+    const aReadsBEvent = await a.from("domain_events").select("id").eq("id", seedB.eventId);
+    const aReadsBJob = await a.from("jobs").select("id").eq("id", seedB.jobId);
+    check(
+      "a member CANNOT read another company's events or jobs",
+      aReadsBEvent.data?.length === 0 && aReadsBJob.data?.length === 0,
+      `events=${aReadsBEvent.data?.length} jobs=${aReadsBJob.data?.length}`,
+    );
+
+    const aWritesEvent = await a.from("domain_events").insert({
+      organization_id: orgA.id,
+      type: "workspace.created",
+      entity_type: "organization",
+    });
+    const aWritesJob = await a.from("jobs").insert({ organization_id: orgA.id, type: "ping" });
+    const aFinishesJob = await a
+      .from("jobs")
+      .update({ status: "succeeded" })
+      .eq("id", seedA.jobId)
+      .select("id");
+    const aRecords = await a.rpc("record_domain_event", {
+      p_organization_id: orgA.id,
+      p_type: "workspace.created",
+      p_entity_type: "organization",
+      p_entity_id: orgA.id,
+      p_payload: {},
+      p_actor_id: userA,
+    });
+    const aClaims = await a.rpc("claim_jobs", { p_limit: 5 });
+    check(
+      "a member CANNOT write events or jobs, record events, or claim jobs",
+      aWritesEvent.error !== null &&
+        aWritesJob.error !== null &&
+        (aFinishesJob.error !== null || aFinishesJob.data?.length === 0) &&
+        aRecords.error !== null &&
+        aClaims.error !== null,
+      `event: ${aWritesEvent.error?.code ?? "INSERTED"}; job: ${aWritesJob.error?.code ?? "INSERTED"}; update: ${aFinishesJob.error?.code ?? aFinishesJob.data?.length}; record: ${aRecords.error?.code ?? "CALLED"}; claim: ${aClaims.error?.code ?? "CALLED"}`,
+    );
+
+    const svcEditsEvent = await admin
+      .from("domain_events")
+      .update({ type: "workspace.renamed" })
+      .eq("id", seedA.eventId);
+    const svcDeletesEvent = await admin.from("domain_events").delete().eq("id", seedA.eventId);
+    const svcDeletesJob = await admin.from("jobs").delete().eq("id", seedA.jobId);
+    check(
+      "even the service role CANNOT change or delete an event, or delete a job",
+      svcEditsEvent.error !== null &&
+        svcDeletesEvent.error !== null &&
+        svcDeletesJob.error !== null,
+      `edit: ${svcEditsEvent.error?.code ?? "ALLOWED"}; delete event: ${svcDeletesEvent.error?.code ?? "ALLOWED"}; delete job: ${svcDeletesJob.error?.code ?? "ALLOWED"}`,
+    );
+
     // ---- Memberships (E1.5.2) -------------------------------------------------
     console.log(
       "\nMemberships — user X, active member of A (bid_manager) and B (pricing_specialist):",
@@ -860,6 +961,15 @@ async function main(): Promise<void> {
         (anonVersions.error !== null || anonVersions.data?.length === 0) &&
         anonFile.error !== null,
       `documents: ${anonDocs.error?.code ?? anonDocs.data?.length}; file: ${anonFile.error ? "blocked" : "READ — CRITICAL"}`,
+    );
+    const anonEventsAndJobs = await Promise.all([
+      anon.from("domain_events").select("id"),
+      anon.from("jobs").select("id"),
+    ]);
+    check(
+      "anonymous callers see no domain events or jobs",
+      anonEventsAndJobs.every((r) => r.error !== null || r.data?.length === 0),
+      anonEventsAndJobs.map((r) => r.error?.code ?? r.data?.length).join(", "),
     );
     const anonProfiles = await anon.from("profiles").select("id");
     check(

@@ -184,6 +184,125 @@ export type Database = {
           },
         ]
       }
+      domain_events: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          entity_id: string | null
+          entity_type: string
+          id: number
+          organization_id: string
+          payload: Json
+          type: string
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          id?: never
+          organization_id: string
+          payload?: Json
+          type: string
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          id?: never
+          organization_id?: string
+          payload?: Json
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "domain_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jobs: {
+        Row: {
+          attempts: number
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          event_id: number | null
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          locked_at: string | null
+          max_attempts: number
+          organization_id: string
+          payload: Json
+          result: Json | null
+          run_after: string
+          status: Database["public"]["Enums"]["job_status"]
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          event_id?: number | null
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          locked_at?: string | null
+          max_attempts?: number
+          organization_id: string
+          payload?: Json
+          result?: Json | null
+          run_after?: string
+          status?: Database["public"]["Enums"]["job_status"]
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          event_id?: number | null
+          finished_at?: string | null
+          id?: string
+          last_error?: string | null
+          locked_at?: string | null
+          max_attempts?: number
+          organization_id?: string
+          payload?: Json
+          result?: Json | null
+          run_after?: string
+          status?: Database["public"]["Enums"]["job_status"]
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jobs_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "domain_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       memberships: {
         Row: {
           created_at: string
@@ -333,9 +452,55 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      claim_jobs: {
+        Args: { p_limit?: number; p_stale_after?: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          event_id: number | null
+          finished_at: string | null
+          id: string
+          last_error: string | null
+          locked_at: string | null
+          max_attempts: number
+          organization_id: string
+          payload: Json
+          result: Json | null
+          run_after: string
+          status: Database["public"]["Enums"]["job_status"]
+          type: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       complete_onboarding: {
         Args: { company_name: string; full_name: string }
         Returns: string
+      }
+      record_domain_event: {
+        Args: {
+          p_actor_id: string
+          p_entity_id: string
+          p_entity_type: string
+          p_job_max_attempts?: number
+          p_job_payload?: Json
+          p_job_type?: string
+          p_organization_id: string
+          p_payload: Json
+          p_type: string
+        }
+        Returns: {
+          event_id: number
+          job_id: string
+        }[]
       }
       switch_organization: {
         Args: { organization_id: string }
@@ -349,6 +514,7 @@ export type Database = {
         | "executive_approver"
         | "viewer"
       document_kind: "company" | "tender"
+      job_status: "queued" | "running" | "succeeded" | "failed"
       membership_status: "invited" | "active" | "removed"
     }
     CompositeTypes: {
@@ -487,6 +653,7 @@ export const Constants = {
         "viewer",
       ],
       document_kind: ["company", "tender"],
+      job_status: ["queued", "running", "succeeded", "failed"],
       membership_status: ["invited", "active", "removed"],
     },
   },
