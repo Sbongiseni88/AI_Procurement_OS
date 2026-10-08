@@ -1,5 +1,6 @@
 /**
- * RLS verification (T1.3, extended per ticket: E1.4 onboarding, E1.5 audit log).
+ * RLS verification (T1.3, extended per ticket: E1.4 onboarding, E1.5 audit log,
+ * E1.5.2 memberships).
  *
  * `tsc` cannot test SQL, so tenant isolation has to be proven against a real
  * database. This script provisions two organizations with one user each, then
@@ -60,8 +61,36 @@ async function signIn(email: string): Promise<SupabaseClient> {
   return client;
 }
 
+type Role = "bid_manager" | "pricing_specialist" | "executive_approver";
+
 async function main(): Promise<void> {
   const created = { userIds: [] as string[], orgIds: [] as string[] };
+
+  /**
+   * A confirmed person with a profile and an active membership in each company
+   * listed, in order (the first is their selected company). Memberships are
+   * inserted one by one so their join dates differ.
+   */
+  async function createPerson(email: string, memberships: [string, Role][]): Promise<string> {
+    const [first] = memberships;
+    if (first === undefined) throw new Error("a person needs at least one membership");
+    const u = await admin.auth.admin.createUser({ email, password: PASSWORD, email_confirm: true });
+    if (u.error || !u.data.user) throw new Error(`createUser failed: ${u.error?.message}`);
+    const id = u.data.user.id;
+    created.userIds.push(id);
+
+    const p = await admin
+      .from("profiles")
+      .insert({ id, full_name: email, active_organization_id: first[0] });
+    if (p.error) throw new Error(`profile insert failed: ${p.error.message}`);
+    for (const [organizationId, role] of memberships) {
+      const m = await admin
+        .from("memberships")
+        .insert({ organization_id: organizationId, user_id: id, role });
+      if (m.error) throw new Error(`membership insert failed: ${m.error.message}`);
+    }
+    return id;
+  }
 
   try {
     // ---- Fixtures (service_role; bypasses RLS by design) -------------------
@@ -79,28 +108,8 @@ async function main(): Promise<void> {
     const emailA = `rls-a-${RUN}@example.com`;
     const emailB = `rls-b-${RUN}@example.com`;
 
-    const userIdByEmail = new Map<string, string>();
-    for (const [email, orgId, role] of [
-      [emailA, orgA.id, "bid_manager"],
-      [emailB, orgB.id, "pricing_specialist"],
-    ] as const) {
-      const u = await admin.auth.admin.createUser({
-        email,
-        password: PASSWORD,
-        email_confirm: true,
-      });
-      if (u.error || !u.data.user) throw new Error(`createUser failed: ${u.error?.message}`);
-      created.userIds.push(u.data.user.id);
-      userIdByEmail.set(email, u.data.user.id);
-
-      const p = await admin
-        .from("profiles")
-        .insert({ id: u.data.user.id, organization_id: orgId, role, full_name: email });
-      if (p.error) throw new Error(`profile insert failed: ${p.error.message}`);
-    }
-
-    const userA = userIdByEmail.get(emailA);
-    if (userA === undefined) throw new Error("user A was not created");
+    const userA = await createPerson(emailA, [[orgA.id, "bid_manager"]]);
+    const userB = await createPerson(emailB, [[orgB.id, "pricing_specialist"]]);
 
     console.log(`\nFixtures: org A=${orgA.id.slice(0, 8)} org B=${orgB.id.slice(0, 8)}\n`);
 
@@ -122,12 +131,10 @@ async function main(): Promise<void> {
       aOrgB.error?.message ?? `got ${aOrgB.data?.length} rows`,
     );
 
-    const aProfiles = await a.from("profiles").select("id, organization_id");
+    const aProfiles = await a.from("profiles").select("id");
     check(
       "sees only profiles within its own organization",
-      !aProfiles.error &&
-        aProfiles.data?.length === 1 &&
-        aProfiles.data.every((r) => r.organization_id === orgA.id),
+      !aProfiles.error && aProfiles.data?.length === 1 && aProfiles.data[0]?.id === userA,
       aProfiles.error?.message ?? `got ${aProfiles.data?.length} rows`,
     );
 
@@ -136,20 +143,24 @@ async function main(): Promise<void> {
     const selfName = await a.from("profiles").update({ full_name: "Renamed" }).eq("id", userA);
     check("may update its own full_name", !selfName.error, selfName.error?.message);
 
+    // Role and company live on the membership (E1.5.2); users hold no UPDATE on it.
     const selfRole = await a
-      .from("profiles")
+      .from("memberships")
       .update({ role: "executive_approver" })
-      .eq("id", userA);
+      .eq("user_id", userA);
     check(
       "CANNOT promote itself to executive_approver",
-      selfRole.error !== null,
+      selfRole.error?.code === "42501",
       selfRole.error ? `blocked: ${selfRole.error.code}` : "UPDATE SUCCEEDED — CRITICAL",
     );
 
-    const selfOrg = await a.from("profiles").update({ organization_id: orgB.id }).eq("id", userA);
+    const selfOrg = await a
+      .from("memberships")
+      .update({ organization_id: orgB.id })
+      .eq("user_id", userA);
     check(
-      "CANNOT move itself into the other organization",
-      selfOrg.error !== null,
+      "CANNOT move its membership into the other organization",
+      selfOrg.error?.code === "42501",
       selfOrg.error ? `blocked: ${selfOrg.error.code}` : "UPDATE SUCCEEDED — CRITICAL",
     );
 
@@ -242,17 +253,19 @@ async function main(): Promise<void> {
     });
     if (typeof cOnboard.data === "string") created.orgIds.push(cOnboard.data);
     const cOrgs = await c.from("organizations").select("id, name");
-    const cProfile = await c.from("profiles").select("organization_id, role, full_name");
+    const cMemberships = await c.from("memberships").select("organization_id, role, status");
     check(
-      "a newcomer creates exactly one workspace and becomes its executive_approver",
+      "a newcomer creates exactly one workspace with an active executive_approver membership",
       !cOnboard.error &&
         cOrgs.data?.length === 1 &&
         cOrgs.data[0]?.id === cOnboard.data &&
         cOrgs.data[0]?.name === `Gamma Supplies ${RUN}` &&
-        cProfile.data?.length === 1 &&
-        cProfile.data[0]?.organization_id === cOnboard.data &&
-        cProfile.data[0]?.role === "executive_approver",
-      cOnboard.error?.message ?? `orgs=${cOrgs.data?.length} profiles=${cProfile.data?.length}`,
+        cMemberships.data?.length === 1 &&
+        cMemberships.data[0]?.organization_id === cOnboard.data &&
+        cMemberships.data[0]?.role === "executive_approver" &&
+        cMemberships.data[0]?.status === "active",
+      cOnboard.error?.message ??
+        `orgs=${cOrgs.data?.length} memberships=${cMemberships.data?.length}`,
     );
 
     const cAgain = await c.rpc("complete_onboarding", {
@@ -269,12 +282,16 @@ async function main(): Promise<void> {
     );
 
     const cId = (await c.auth.getUser()).data.user?.id ?? "";
-    const cJoin = await c.from("profiles").update({ organization_id: orgA.id }).eq("id", cId);
+    const cJoin = await c
+      .from("memberships")
+      .update({ organization_id: orgA.id })
+      .eq("user_id", cId);
+    const cSwitch = await c.rpc("switch_organization", { organization_id: orgA.id });
     const cSeesA = await c.from("organizations").select("id").eq("id", orgA.id);
     check(
       "an onboarded user CANNOT move into another company afterwards",
-      cJoin.error !== null && cSeesA.data?.length === 0,
-      cJoin.error ? `blocked: ${cJoin.error.code}` : "PROFILE MOVED — CRITICAL",
+      cJoin.error?.code === "42501" && cSwitch.error !== null && cSeesA.data?.length === 0,
+      `membership: ${cJoin.error?.code ?? "MOVED — CRITICAL"}; switch: ${cSwitch.error?.code ?? "SWITCHED — CRITICAL"}`,
     );
 
     const d = await signIn(await createNewcomer("d"));
@@ -405,6 +422,173 @@ async function main(): Promise<void> {
       cEvents.error?.message ?? `got ${cEvents.data?.length} rows`,
     );
 
+    // ---- Memberships (E1.5.2) -------------------------------------------------
+    console.log(
+      "\nMemberships — user X, active member of A (bid_manager) and B (pricing_specialist):",
+    );
+    const orgC = cOnboard.data;
+    if (typeof orgC !== "string") throw new Error("onboarding fixture missing");
+    const emailX = `rls-x-${RUN}@example.com`;
+    const userX = await createPerson(emailX, [
+      [orgA.id, "bid_manager"],
+      [orgB.id, "pricing_specialist"],
+    ]);
+    const x = await signIn(emailX);
+
+    async function orgIdsSeen(client: SupabaseClient): Promise<string[]> {
+      const r = await client.from("organizations").select("id");
+      if (r.error) throw new Error(`organization read failed: ${r.error.message}`);
+      return r.data.map((o: { id: string }) => o.id);
+    }
+    async function setMembershipStatus(orgId: string, status: "active" | "removed") {
+      const r = await admin
+        .from("memberships")
+        .update({ status })
+        .eq("user_id", userX)
+        .eq("organization_id", orgId);
+      if (r.error) throw new Error(`membership update failed: ${r.error.message}`);
+    }
+
+    const xOrgs = await orgIdsSeen(x);
+    const xEvents = await x.from("audit_events").select("organization_id");
+    const xProfiles = await x.from("profiles").select("id");
+    check(
+      "a person in two companies sees only the active one: its company, events and people",
+      xOrgs.length === 1 &&
+        xOrgs[0] === orgA.id &&
+        !xEvents.error &&
+        xEvents.data.length > 0 &&
+        xEvents.data.every((e) => e.organization_id === orgA.id) &&
+        !xProfiles.error &&
+        xProfiles.data.some((p) => p.id === userA) &&
+        !xProfiles.data.some((p) => p.id === userB),
+      `orgs=${xOrgs.length} events=${xEvents.data?.length} profiles=${xProfiles.data?.length}`,
+    );
+
+    const aSeesX = await a.from("memberships").select("organization_id").eq("user_id", userX);
+    check(
+      "co-members see a person's membership in their company, not in other companies",
+      !aSeesX.error && aSeesX.data.length === 1 && aSeesX.data[0]?.organization_id === orgA.id,
+      aSeesX.error?.message ?? `got ${aSeesX.data?.length} rows`,
+    );
+
+    const xRenamesA = await x
+      .from("organizations")
+      .update({ name: `Alpha Bidders ${RUN} (by X)` })
+      .eq("id", orgA.id)
+      .select("id");
+    const xSwitch = await x.rpc("switch_organization", { organization_id: orgB.id });
+    const xOrgsAfterSwitch = await orgIdsSeen(x);
+    const xRenamesB = await x
+      .from("organizations")
+      .update({ name: `Beta Contractors ${RUN} (by X)` })
+      .eq("id", orgB.id)
+      .select("id");
+    check(
+      "switching to the other company moves access and role there (bid_manager in A, pricing_specialist in B)",
+      xRenamesA.data?.length === 1 &&
+        !xSwitch.error &&
+        xOrgsAfterSwitch.length === 1 &&
+        xOrgsAfterSwitch[0] === orgB.id &&
+        (xRenamesB.error !== null || xRenamesB.data?.length === 0),
+      `renameA=${xRenamesA.data?.length} switch=${xSwitch.error?.code ?? "ok"} orgs=${xOrgsAfterSwitch.join(",").slice(0, 20)} renameB=${xRenamesB.data?.length}`,
+    );
+
+    const xToC = await x.rpc("switch_organization", { organization_id: orgC });
+    check(
+      "CANNOT switch to a company it is not a member of",
+      xToC.error !== null && (await orgIdsSeen(x)).every((id) => id === orgB.id),
+      xToC.error ? `blocked: ${xToC.error.code}` : "SWITCHED — CRITICAL",
+    );
+
+    const forged = await admin
+      .from("profiles")
+      .update({ active_organization_id: orgC })
+      .eq("id", userX);
+    if (forged.error) throw new Error(`selection update failed: ${forged.error.message}`);
+    const xWithForged = await orgIdsSeen(x);
+    check(
+      "a stored selection of a non-member company grants nothing (falls back to a real membership)",
+      xWithForged.length === 1 &&
+        xWithForged[0] !== orgC &&
+        [orgA.id, orgB.id].includes(xWithForged[0] ?? ""),
+      `sees ${xWithForged.length} orgs${xWithForged.includes(orgC) ? " INCLUDING C — CRITICAL" : ""}`,
+    );
+
+    const xJoinsC = await x
+      .from("memberships")
+      .insert({ organization_id: orgC, user_id: userX, role: "executive_approver" });
+    const aJoinsB = await a
+      .from("memberships")
+      .insert({ organization_id: orgB.id, user_id: userA, role: "bid_manager" });
+    const joined = await admin
+      .from("memberships")
+      .select("id")
+      .or(
+        `and(user_id.eq.${userX},organization_id.eq.${orgC}),and(user_id.eq.${userA},organization_id.eq.${orgB.id})`,
+      );
+    check(
+      "CANNOT add itself to a company",
+      xJoinsC.error !== null && aJoinsB.error !== null && joined.data?.length === 0,
+      `X: ${xJoinsC.error?.code ?? "INSERTED"}; A: ${aJoinsB.error?.code ?? "INSERTED"}`,
+    );
+
+    const xPromotes = await x
+      .from("memberships")
+      .update({ role: "executive_approver" })
+      .eq("user_id", userX)
+      .select("id");
+    const xRoles = await admin.from("memberships").select("role").eq("user_id", userX);
+    check(
+      "CANNOT raise its own role",
+      (xPromotes.error !== null || xPromotes.data?.length === 0) &&
+        !xRoles.error &&
+        !xRoles.data.some((m) => m.role === "executive_approver"),
+      xPromotes.error
+        ? `blocked: ${xPromotes.error.code}`
+        : `affected ${xPromotes.data?.length} rows`,
+    );
+
+    const xSetsActive = await x
+      .from("profiles")
+      .update({ active_organization_id: orgB.id })
+      .eq("id", userX);
+    check(
+      "CANNOT set its selected company directly (only through switch_organization)",
+      xSetsActive.error !== null,
+      xSetsActive.error ? `blocked: ${xSetsActive.error.code}` : "UPDATE SUCCEEDED",
+    );
+
+    const xBackToB = await x.rpc("switch_organization", { organization_id: orgB.id });
+    await setMembershipStatus(orgB.id, "removed");
+    const xAfterRemoval = await orgIdsSeen(x);
+    const xToRemoved = await x.rpc("switch_organization", { organization_id: orgB.id });
+    check(
+      "a removed membership gives no access and cannot be switched to",
+      !xBackToB.error &&
+        xAfterRemoval.length === 1 &&
+        xAfterRemoval[0] === orgA.id &&
+        xToRemoved.error !== null,
+      `switch=${xBackToB.error?.code ?? "ok"} sees=${xAfterRemoval.length} switchRemoved=${xToRemoved.error?.code ?? "ALLOWED"}`,
+    );
+
+    await setMembershipStatus(orgA.id, "removed");
+    const xNoMembership = await orgIdsSeen(x);
+    const xNoEvents = await x.from("audit_events").select("id");
+    check(
+      "with no active membership a person sees nothing (fails closed)",
+      xNoMembership.length === 0 && !xNoEvents.error && xNoEvents.data.length === 0,
+      `orgs=${xNoMembership.length} events=${xNoEvents.data?.length}`,
+    );
+
+    const helperRpc = await x.rpc("current_organization_id");
+    const privateRpc = await x.schema("private").rpc("current_organization_id");
+    check(
+      "the session helpers are not reachable through the API",
+      helperRpc.error !== null && privateRpc.error !== null,
+      `public: ${helperRpc.error?.code ?? "ok"}; private: ${privateRpc.error?.code ?? "ok"}`,
+    );
+
     // ---- Anonymous access ---------------------------------------------------
     console.log("\nAnonymous (no session):");
     const anon = createClient(URL, PUBLISHABLE, {
@@ -432,6 +616,14 @@ async function main(): Promise<void> {
       anonEvents.error
         ? `blocked: ${anonEvents.error.code}`
         : `got ${anonEvents.data?.length} rows`,
+    );
+    const anonSwitch = await anon.rpc("switch_organization", { organization_id: orgA.id });
+    const anonMemberships = await anon.from("memberships").select("id");
+    check(
+      "anonymous callers see no memberships and cannot switch company",
+      anonSwitch.error !== null &&
+        (anonMemberships.error !== null || anonMemberships.data?.length === 0),
+      `switch: ${anonSwitch.error?.code ?? "ALLOWED"}; memberships: ${anonMemberships.error?.code ?? anonMemberships.data?.length}`,
     );
     const anonProfiles = await anon.from("profiles").select("id");
     check(

@@ -25,24 +25,31 @@ export type Membership = {
 };
 
 /**
- * The signed-in user's profile and organization, or null if they have not completed
- * onboarding. Read through the user's own client, so RLS decides what comes back.
+ * The signed-in user's active membership: the company they are working in and their
+ * role there, or null if they have none (not onboarded yet, or every membership
+ * removed). Read through the user's own client, so RLS decides what comes back.
+ *
+ * A person may hold several active memberships, but RLS shows them only one
+ * organization: the one `private.current_organization_id()` picks (their selected
+ * company if they are an active member of it, else their oldest active membership).
+ * The inner join therefore keeps exactly that membership. Nothing here trusts the
+ * selection stored on the profile.
  */
 export const getMembership = cache(async (): Promise<Membership | null> => {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
-    .from("profiles")
-    // Named: profiles has two foreign keys to organizations since E1.5.2.
-    .select("role, full_name, organization:organizations!profiles_organization_id_fkey (id, name)")
-    .eq("id", user.id)
+    .from("memberships")
+    .select("role, organization:organizations!inner (id, name), profile:profiles!inner (full_name)")
+    .eq("user_id", user.id)
+    .eq("status", "active")
     .maybeSingle();
   if (error) throw new Error(`Could not load your workspace: ${error.message}`);
-  if (data === null || data.organization === null) return null;
+  if (data === null) return null;
   return {
     userId: user.id,
     email: user.email,
-    fullName: data.full_name ?? "",
+    fullName: data.profile.full_name ?? "",
     role: data.role,
     organization: data.organization,
   };

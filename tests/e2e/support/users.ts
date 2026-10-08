@@ -63,8 +63,6 @@ export async function createMember(label = "member"): Promise<TestMember> {
   const user = await createConfirmedUser(label);
   const profile = await admin.from("profiles").insert({
     id: user.id,
-    organization_id: organizationId,
-    role: "bid_manager",
     full_name: "E2E Member",
     active_organization_id: organizationId,
   });
