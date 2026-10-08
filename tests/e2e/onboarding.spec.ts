@@ -79,3 +79,53 @@ test("a member who has a workspace skips onboarding", async ({ page, member }) =
   await page.goto("/onboarding");
   await expect(page).toHaveURL(/\/$/);
 });
+
+test("a person whose memberships were all removed is told to ask for access, not onboarded again", async ({
+  page,
+  member,
+}) => {
+  const { error } = await adminClient()
+    .from("memberships")
+    .update({ status: "removed" })
+    .eq("user_id", member.id);
+  expect(error).toBeNull();
+
+  await logInViaForm(page, member);
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(page.getByRole("heading", { name: "No active company" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create workspace" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+});
+
+test("a person in two companies works in the one they selected, with that company's role", async ({
+  page,
+  member,
+}) => {
+  const admin = adminClient();
+  const second = `E2E Second Company ${Date.now()}`;
+  const org = await admin.from("organizations").insert({ name: second }).select("id").single();
+  expect(org.error).toBeNull();
+  const secondId: unknown = org.data?.id;
+  if (typeof secondId !== "string") throw new Error("second company was not created");
+  // Added before anything can fail, so the fixture's cleanup removes the company too.
+  const joined = await admin
+    .from("memberships")
+    .insert({ organization_id: secondId, user_id: member.id, role: "pricing_specialist" });
+  expect(joined.error).toBeNull();
+
+  await logInViaForm(page, member);
+  await page.getByRole("button", { name: /account menu/ }).click();
+  await expect(page.getByText(`Bid manager at ${member.organizationName}`)).toBeVisible();
+
+  const selected = await admin
+    .from("profiles")
+    .update({ active_organization_id: secondId })
+    .eq("id", member.id);
+  expect(selected.error).toBeNull();
+  await page.goto("/settings");
+  await page.getByRole("button", { name: /account menu/ }).click();
+  await expect(page.getByText(`Pricing specialist at ${second}`)).toBeVisible();
+  await expect(page.getByText(member.organizationName)).toHaveCount(0);
+});

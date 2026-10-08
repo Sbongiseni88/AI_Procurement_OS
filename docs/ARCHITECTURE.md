@@ -63,13 +63,13 @@ graph TB
 Inside the app, Server Components are the read path, Server Actions the write path, and
 Route Handlers are used only for uploads, the job runner and AI work where needed.
 
-| Platform core part                  | Status                                                                                                               |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Companies, memberships, permissions | Companies, one-company profiles and three roles **built** (T1.3, E1.4); memberships E1.5.2, permission matrix E1.5.3 |
-| Documents and versions              | Planned, E1.5.4                                                                                                      |
-| Audit log and domain events         | Audit log **built** (E1, ticket E1.5); domain events E1.5.5                                                          |
-| Jobs and job runner                 | Planned, E1.5.5                                                                                                      |
-| AI gateway                          | Planned, E1.5.6                                                                                                      |
+| Platform core part                  | Status                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Companies, memberships, permissions | Companies, three roles and memberships **built** (T1.3, E1.4, E1.5.2); permission matrix E1.5.3 |
+| Documents and versions              | Planned, E1.5.4                                                                                 |
+| Audit log and domain events         | Audit log **built** (E1, ticket E1.5); domain events E1.5.5                                     |
+| Jobs and job runner                 | Planned, E1.5.5                                                                                 |
+| AI gateway                          | Planned, E1.5.6                                                                                 |
 
 **Trust boundary:** every database read and write crosses RLS. `auth.uid()` and the
 caller's `organization_id` are the only tenancy discriminators — the application layer
@@ -393,8 +393,8 @@ person) links to `organizations` (the tenant) and carries the standard RLS polic
 | Table                            | Holds                                                                                                                                                                                      | Status                      |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
 | `organizations`                  | The tenant: company name, registration, VAT and CSD numbers.                                                                                                                               | **Built** (T1.3)            |
-| `profiles`                       | The person: name and login identity. Today it also binds the person to one company and one role; E1.5.2 moves both to `memberships`.                                                       | **Built** (T1.3)            |
-| `memberships`                    | Person ↔ company with a role and status. Replaces the one-company-per-person link.                                                                                                         | Planned, E1.5.2             |
+| `profiles`                       | The person: name and login identity, and the company they last chose to work in (a preference; access comes from memberships).                                                             | **Built** (T1.3)            |
+| `memberships`                    | Person ↔ company with a role and status. Replaces the one-company-per-person link.                                                                                                         | **Built** (E1.5.2)          |
 | `audit_events`                   | Who did what, when, to which record. Append-only.                                                                                                                                          | **Built** (E1, ticket E1.5) |
 | `domain_events`                  | Business events (document uploaded, tender read, requirement confirmed) that jobs and future agents react to.                                                                              | Planned, E1.5.5             |
 | `jobs`                           | Background work: type, status, attempts, result, error, linked record.                                                                                                                     | Planned, E1.5.5             |
@@ -430,7 +430,7 @@ erDiagram
     TENDER_REQUIREMENTS ||--o{ REQUIREMENT_DECISIONS : "reviewed in"
 ```
 
-Built today: `organizations`, `profiles`, `audit_events` (detailed diagram below). Every
+Built today: `organizations`, `profiles`, `memberships`, `audit_events` (detailed diagram below). Every
 other entity in this diagram is planned, in the ticket named in the table above.
 
 ### Table conventions
@@ -468,17 +468,22 @@ Every table follows these, now and in future modules (Architecture rules in `doc
 
 Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 
-| Migration                                           | Ticket | Adds                                                                |
-| --------------------------------------------------- | ------ | ------------------------------------------------------------------- |
-| `20260908133617_init_organizations_profiles_rbac`   | T1.3   | `organizations`, `profiles`, `app_role`, RLS, anti-escalation       |
-| `20261008132310_onboarding_create_workspace`        | E1.4   | `private` schema, `private.create_workspace`, `complete_onboarding` |
-| `20261008132832_onboarding_reject_whitespace_names` | E1.4   | names must contain visible text (tabs/newlines no longer pass)      |
-| `20261008133132_audit_events`                       | E1.5   | append-only `audit_events`, read own org only                       |
+| Migration                                           | Ticket  | Adds                                                                                            |
+| --------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `20260908133617_init_organizations_profiles_rbac`   | T1.3    | `organizations`, `profiles`, `app_role`, RLS, anti-escalation                                   |
+| `20261008132310_onboarding_create_workspace`        | E1.4    | `private` schema, `private.create_workspace`, `complete_onboarding`                             |
+| `20261008132832_onboarding_reject_whitespace_names` | E1.4    | names must contain visible text (tabs/newlines no longer pass)                                  |
+| `20261008133132_audit_events`                       | E1 E1.5 | append-only `audit_events`, read own org only                                                   |
+| `20261008153917_memberships`                        | E1.5.2  | `memberships`, `membership_status`, `profiles.active_organization_id`, backfill from profiles   |
+| `20261008154447_access_follows_active_membership`   | E1.5.2  | helpers in `private` read the active membership; every policy re-pointed; `switch_organization` |
+| `20261008154918_drop_profile_company_and_role`      | E1.5.2  | drops `profiles.organization_id` and `profiles.role`; profile guard now on the selection        |
 
 ```mermaid
 erDiagram
     AUTH_USERS ||--|| PROFILES : "id (FK, on delete cascade)"
-    ORGANIZATIONS ||--o{ PROFILES : "organization_id (FK, on delete restrict)"
+    PROFILES ||--o{ MEMBERSHIPS : "user_id (FK, on delete cascade)"
+    ORGANIZATIONS ||--o{ MEMBERSHIPS : "organization_id (FK, on delete cascade)"
+    ORGANIZATIONS |o--o{ PROFILES : "active_organization_id (FK, on delete set null)"
     ORGANIZATIONS ||--o{ AUDIT_EVENTS : "organization_id (FK, on delete cascade)"
 
     AUTH_USERS {
@@ -498,9 +503,19 @@ erDiagram
 
     PROFILES {
         uuid id PK-FK "= auth.users.id"
-        uuid organization_id FK "NOT NULL"
-        app_role role "NOT NULL, default bid_manager"
         text full_name "nullable"
+        uuid active_organization_id FK "nullable; a preference, never access"
+        timestamptz created_at
+        timestamptz updated_at "trigger-maintained"
+    }
+
+    MEMBERSHIPS {
+        uuid id PK "gen_random_uuid()"
+        uuid organization_id FK "NOT NULL"
+        uuid user_id FK "NOT NULL, = profiles.id"
+        app_role role "NOT NULL, default bid_manager"
+        membership_status status "invited | active | removed"
+        uuid invited_by "nullable, no FK"
         timestamptz created_at
         timestamptz updated_at "trigger-maintained"
     }
@@ -517,77 +532,116 @@ erDiagram
     }
 ```
 
-`organizations` is the tenant root. `profiles` is 1:1 with `auth.users` and binds each user to
-exactly one organization and one role. `app_role` is an enum:
-`bid_manager | pricing_specialist | executive_approver`.
+`organizations` is the tenant root. `profiles` is the person, 1:1 with `auth.users`.
+`memberships` binds a person to a company with a role (`app_role`:
+`bid_manager | pricing_specialist | executive_approver`) and a status (`invited | active |
+removed`); it is unique per company and person. Only `active` memberships give access. A
+membership ends by status `removed`, never by deletion (no `DELETE` privilege, even for the
+service role); rows go only when their person or company is deleted.
 
-**`profiles.organization_id` is NOT NULL deliberately.** A nullable tenant key invites
+**`memberships.organization_id` is NOT NULL deliberately.** A nullable tenant key invites
 `organization_id = NULL` comparisons, which evaluate to NULL rather than false — a classic
 way for a policy to silently stop filtering.
+
+### Active company (E1.5.2)
+
+A person may hold several active memberships (a consultant, a group director) but works in
+one company at a time, and sees only that company's data.
+
+- **Stored selection, never trusted alone.** `profiles.active_organization_id` records the
+  company the person chose. `private.current_organization_id()` returns, from the caller's
+  **active** memberships, the chosen one if it is among them, else the oldest, else NULL.
+  The stored value only orders real memberships, so a value pointing at a company the
+  person does not (or no longer) belong to grants nothing. `verify:rls` proves this by
+  writing such a value as the service role.
+- **Switching** goes through `rpc/switch_organization(organization_id)` (INVOKER wrapper)
+  → `private.set_active_organization` (DEFINER), which refuses any company without an
+  active membership. Users hold no `UPDATE` on the column; a trigger guards it too. There is
+  no switcher in the UI yet: in Phase 1 nobody has a second membership until invitations
+  exist (later).
+- **Only the active company is visible.** `organizations` shows exactly one row, so the app
+  reads the membership with an inner join to `organizations` and gets exactly the active one
+  (`getMembership`, `src/lib/workspace/membership.ts`). A person's own membership rows in
+  other companies are visible to them (for a future switcher); co-members see only
+  memberships in their shared company, and cannot read a person's `active_organization_id`
+  (column-level `SELECT`: `id, full_name, created_at, updated_at`).
+- **No active membership** (all removed, or the company deleted): every policy returns
+  nothing. The onboarding page tells such a person to ask for their access back, because
+  onboarding creates a first workspace only for someone who never had one.
 
 ### RLS policy matrix
 
 RLS is enabled on every table. `anon` is granted nothing.
 
-| Table           | SELECT        | INSERT                                         | UPDATE                                                                               | DELETE                                                       |
-| --------------- | ------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `organizations` | own org only  | **denied**                                     | own org, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied**                                                   |
-| `profiles`      | same org only | **denied**                                     | own row only, and only `full_name`                                                   | **denied**                                                   |
-| `audit_events`  | own org only  | **denied** (service role via the audit helper) | **denied to everyone**                                                               | **denied to everyone** (only cascades with its organization) |
+| Table           | SELECT                                                                                                        | INSERT                                         | UPDATE                                                                                      | DELETE                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `organizations` | the active company only                                                                                       | **denied**                                     | active company, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied**                                                    |
+| `profiles`      | yourself, and people with a membership in the active company; columns `id, full_name, created_at, updated_at` | **denied**                                     | own row only, and only `full_name`                                                          | **denied**                                                    |
+| `memberships`   | your own (any company), and every membership in the active company                                            | **denied**                                     | **denied** (service role only)                                                              | **denied to everyone** (only cascades with person or company) |
+| `audit_events`  | active company only                                                                                           | **denied** (service role via the audit helper) | **denied to everyone**                                                                      | **denied to everyone** (only cascades with its organization)  |
 
-INSERT and DELETE are denied to all user roles on both tables. That is intentional:
-provisioning a profile is how a user would otherwise insert themselves into a rival's
-organization. Both are `service_role`-only, with one exception: onboarding (below) creates
-a _new_ organization and the caller's own first profile.
+INSERT and DELETE are denied to all user roles on these tables. That is intentional:
+inserting a membership or profile is how a user would otherwise put themselves into a
+rival's company. Provisioning is `service_role`-only, with one exception: onboarding (below)
+creates a _new_ organization and the caller's own first profile and membership.
 
 ### Anti-escalation, in two layers
 
-The threat is a user promoting themselves to `executive_approver` and approving their own bid.
+The threat is a user promoting themselves to `executive_approver` and approving their own
+bid, or adding themselves to another company.
 
-1. **Column-level `GRANT` (primary).** `authenticated` holds `UPDATE (full_name)` on
-   `profiles` — `role` and `organization_id` are not grantable, so the attempt is rejected at
-   the privilege layer before RLS is even consulted.
-2. **`forbid_self_privilege_change` trigger (defence-in-depth).** Rejects any change to
-   `role` or `organization_id` unless `current_user` is `service_role`, `postgres` or
-   `supabase_admin`. This exists because a future migration running
-   `grant all on public.profiles to authenticated` would silently re-open layer 1.
+1. **Privileges (primary).** `authenticated` holds only `SELECT` on `memberships` and only
+   `UPDATE (full_name)` on `profiles`, so changing a role, a company or the selection is
+   rejected at the privilege layer before RLS is even consulted.
+2. **Triggers (defence-in-depth).** `private.forbid_membership_changes_by_users` rejects any
+   insert, update or delete on `memberships`, and `forbid_self_privilege_change` rejects a
+   change to `profiles.active_organization_id`, unless `current_user` is `service_role`,
+   `postgres` or `supabase_admin` (cascades from deleting a person or company pass). They
+   exist because a future `grant all ... to authenticated` would silently re-open layer 1.
 
-The trigger is **SECURITY INVOKER** on purpose. As `SECURITY DEFINER` its `current_user`
-would resolve to the function owner rather than the caller, so the privileged-role check
-would never match and legitimate administrative role changes would all be rejected.
+The triggers are **SECURITY INVOKER** on purpose. As `SECURITY DEFINER` their
+`current_user` would resolve to the function owner rather than the caller. Conversely,
+inside the DEFINER functions (`create_workspace`, `set_active_organization`, owned by
+`postgres`) `current_user` is `postgres`, which is how onboarding and switching pass.
 
 ### Session helpers
 
-`public.current_organization_id()` and `public.current_user_role()` are `SECURITY DEFINER`
-because a policy on `profiles` that reads `profiles` recurses infinitely; running as the
-owner bypasses RLS on the lookup and breaks the cycle. Both carry `SET search_path = ''` —
-mandatory on any `SECURITY DEFINER` function, since otherwise a caller can prepend a schema
-and hijack an unqualified name into running their own code with the owner's privileges.
-Every identifier in those bodies is fully qualified as a result. `EXECUTE` is revoked from
-`PUBLIC` and granted only to `authenticated`.
+`private.current_organization_id()` and `private.current_user_role()` (the role in that
+company) are `SECURITY DEFINER` because the policy on `memberships` calls them and they read
+`memberships`; running as the owner bypasses RLS on the lookup and breaks the cycle. Both
+carry `SET search_path = ''` — mandatory on any `SECURITY DEFINER` function, since otherwise
+a caller can prepend a schema and hijack an unqualified name into running their own code
+with the owner's privileges. Every identifier in those bodies is fully qualified as a
+result.
 
-Both return NULL when the caller has no profile, so every policy **fails closed**.
+They live in `private`, which the API does not expose (until E1.5.2 they were in `public`
+and callable as `/rest/v1/rpc/…`, which the database advisors flagged). `EXECUTE` is
+granted only to `authenticated`, because policies run them as the signed-in user.
+
+Both return NULL when the caller has no active membership, so every policy **fails closed**.
 
 Policies wrap them as `(select fn())` rather than `fn()`, so Postgres evaluates them once per
 statement as an InitPlan instead of once per row.
 
-### Onboarding (E1.4)
+### Onboarding (E1.4, membership since E1.5.2)
 
-A new sign-up has no profile, so every policy returns nothing for them (fail closed). The
+A new sign-up has no membership, so every policy returns nothing for them (fail closed). The
 app sends them to `/onboarding`, whose Server Action calls `rpc("complete_onboarding")`.
 
-```
+```text
 public.complete_onboarding(company_name, full_name)   SECURITY INVOKER, exposed via PostgREST
   └─ private.create_workspace(company_name, full_name) SECURITY DEFINER, schema not exposed
        1. auth.uid() must be set
        2. both names: 1–200 visible characters (all whitespace trimmed)
-       3. caller must have NO profile yet (profiles.id PK also stops a concurrent repeat)
-       4. insert organizations → insert profiles (caller, new org, executive_approver)
+       3. caller must have NO profile and NO membership yet
+          (profiles.id PK also stops a concurrent repeat)
+       4. insert organizations → insert profiles (caller, name, selection = new org)
+          → insert memberships (new org, caller, executive_approver, active)
 ```
 
 There is no user-id or organization-id parameter, so it can only create a workspace for
-the caller and can never attach anyone to an existing company. Both inserts happen in one
-function call, so a failure leaves neither behind. The first member is `executive_approver`
+the caller and can never attach anyone to an existing company. All inserts happen in one
+function call, so a failure leaves none behind. The first member is `executive_approver`
 (the company's owner); later members arrive by invitation, which is not in Phase 1.
 
 ### Audit log (E1, ticket E1.5)
@@ -618,13 +672,20 @@ two writes, not one transaction, so a database failure between them loses that o
 ### Verification
 
 `npm run verify:rls` (`scripts/verify-rls.ts`) provisions organizations and users and asserts
-tenant isolation over the wire, as those users, through PostgREST. **27/27** as of E1.5.
-Cases that must fail: self-promotion, self-transfer between organizations, organization
-creation, cross-tenant read and rename; onboarding twice, a second workspace, joining
-another company, blank or whitespace-only names, anonymous onboarding, and calling
+tenant isolation over the wire, as those users, through PostgREST. **39/39** as of E1.5.2.
+Cases that must fail: self-promotion and moving a membership to another company,
+organization creation, cross-tenant read and rename; onboarding twice, a second workspace,
+joining another company, blank or whitespace-only names, anonymous onboarding, and calling
 `private.create_workspace` through the API; reading another company's audit events, writing
-an event directly, and updating or deleting one (even as the service role). The run deletes everything it created,
-sweeping by its run suffix so even a wrongly created organization is removed.
+an event directly, and updating or deleting one (even as the service role). Memberships
+(E1.5.2): a person in two companies sees only the active one (company, events, people) and
+their role follows it; co-members do not see their other memberships; switching to a
+company without a membership, adding oneself to a company, raising one's own role, setting
+the selection directly, using a removed membership, a forged stored selection, and reaching
+the session helpers through the API all fail; with no active membership a person sees
+nothing. The forged-selection check was mutation-tested: a helper that trusts the stored
+value fails three checks. The run deletes everything it created, sweeping by its run suffix
+so even a wrongly created organization is removed.
 
 ### Generated types
 
@@ -715,39 +776,43 @@ What Phase 1 builds and which later modules reuse it.
 
 ## 13. Decision Log
 
-| #   | Decision                                                               | Rationale                                                                                                                                                                                                              |
-| --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Next.js app at repo root, not a monorepo                               | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                                                                               |
-| 2   | PDF extraction via Next.js Route Handlers, not a Python service        | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.                                                                 |
-| 3   | Anthropic over OpenAI                                                  | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                                                                                |
-| 4   | System font stack, not Geist                                           | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.                                                                    |
-| 5   | RLS as the tenancy enforcement point                                   | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                                                                                           |
-| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)        | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                                                                                           |
-| 7   | Three separate Supabase clients rather than one configurable factory   | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site.                                                                |
-| 8   | Env validated with Zod at import time, split by trust boundary         | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                                                                               |
-| 9   | `Database` type is a committed placeholder until T1.3                  | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.                                                                       |
-| 10  | `profiles.organization_id` NOT NULL                                    | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                                                                                        |
-| 11  | INSERT/DELETE denied to all user roles on both tables                  | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                                                                                     |
-| 12  | Anti-escalation duplicated across column GRANTs and a trigger          | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                                                                                            |
-| 13  | Phase 1 scoped to tender compliance                                    | Client's booklet has 45 builds; the quote covered five milestones ending 13 Nov 2026 (now 18 Nov, with Milestone 1.5; see #26). Later stages are in §11.                                                               |
-| 14  | Old static prototype deleted; UI designed fresh                        | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                                                                                         |
-| 15  | Client's earlier Python/FastAPI builds not used                        | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.                                                                        |
-| 16  | Compliance matching is deterministic code, not AI                      | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                                                                                           |
-| 17  | Claude Opus 5.5 through a single AI gateway                            | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                                                                                  |
-| 18  | Third-party Claude skills vendored into `.claude/skills/`              | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                                                                                |
-| 19  | E2E suite runs against `next build && next start`, not `next dev`      | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                                                                                              |
-| 20  | Tests create users with the admin API (`createUser`, `generateLink`)   | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.                                                                          |
-| 21  | Password reset only from a fresh email-link session                    | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                                                                                        |
-| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public` | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.                                                                             |
-| 23  | Workspace creator becomes `executive_approver`                         | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                                                                                       |
-| 24  | Audit events written by the service role through one helper            | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                                                                                       |
-| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade  | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                                                                                       |
-| 26  | Phase 1 is the first production module on a shared platform core       | Client requirement of 8 Oct 2026. Pricing, suppliers, submissions and agents must plug into one database, login, document store, audit trail, AI gateway and task engine instead of being rebuilt. Adds Milestone 1.5. |
-| 27  | Tenancy through `memberships`, not a company stored on the profile     | A consultant or group director can belong to several companies; adding a company becomes data, not code. Access follows the active membership (E1.5.2).                                                                |
-| 28  | One permission matrix in code; RLS keeps tenancy and sensitive writes  | Booklet roles are added to one table, not to every screen. The database still refuses cross-company access and forged writes if the app has a bug.                                                                     |
-| 29  | Files only as `documents` with immutable, SHA-256-hashed versions      | Evidence must be provable later (submission locks, disputes): the original is never overwritten or deleted, and the hash shows it is unchanged.                                                                        |
-| 30  | Background work in a Postgres `jobs` table with a job runner route     | No queue service to host or pay for. Claimed with `FOR UPDATE SKIP LOCKED`; future AI agents are new job types. Revisit if volume outgrows it.                                                                         |
-| 31  | Provider-neutral AI gateway; Claude is the first adapter               | Another provider is a new adapter, not a rewrite. One place logs model, tokens, cost and time in `ai_runs` (supersedes the single-provider wording of #17).                                                            |
-| 32  | Rules only from the tender; no default certification period            | Correction to the quote: age limits apply only when a tender states them, stored with page and quote. A silent tender applies no limit.                                                                                |
-| 33  | Archive, don't delete                                                  | Business records and evidence history are archived (`archived_at`), never hard-deleted, so past bids stay explainable.                                                                                                 |
-| 34  | Future-module tables designed now, created with their module           | The entity map (§10) keeps Phase 1 compatible with the full platform without carrying empty tables, migrations and RLS for features not yet built.                                                                     |
+| #   | Decision                                                                | Rationale                                                                                                                                                                                                              |
+| --- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Next.js app at repo root, not a monorepo                                | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                                                                               |
+| 2   | PDF extraction via Next.js Route Handlers, not a Python service         | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.                                                                 |
+| 3   | Anthropic over OpenAI                                                   | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                                                                                |
+| 4   | System font stack, not Geist                                            | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.                                                                    |
+| 5   | RLS as the tenancy enforcement point                                    | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                                                                                           |
+| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)         | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                                                                                           |
+| 7   | Three separate Supabase clients rather than one configurable factory    | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site.                                                                |
+| 8   | Env validated with Zod at import time, split by trust boundary          | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                                                                               |
+| 9   | `Database` type is a committed placeholder until T1.3                   | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.                                                                       |
+| 10  | `profiles.organization_id` NOT NULL                                     | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                                                                                        |
+| 11  | INSERT/DELETE denied to all user roles on both tables                   | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                                                                                     |
+| 12  | Anti-escalation duplicated across column GRANTs and a trigger           | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                                                                                            |
+| 13  | Phase 1 scoped to tender compliance                                     | Client's booklet has 45 builds; the quote covered five milestones ending 13 Nov 2026 (now 18 Nov, with Milestone 1.5; see #26). Later stages are in §11.                                                               |
+| 14  | Old static prototype deleted; UI designed fresh                         | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                                                                                         |
+| 15  | Client's earlier Python/FastAPI builds not used                         | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.                                                                        |
+| 16  | Compliance matching is deterministic code, not AI                       | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                                                                                           |
+| 17  | Claude Opus 5.5 through a single AI gateway                             | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                                                                                  |
+| 18  | Third-party Claude skills vendored into `.claude/skills/`               | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                                                                                |
+| 19  | E2E suite runs against `next build && next start`, not `next dev`       | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                                                                                              |
+| 20  | Tests create users with the admin API (`createUser`, `generateLink`)    | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.                                                                          |
+| 21  | Password reset only from a fresh email-link session                     | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                                                                                        |
+| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public`  | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.                                                                             |
+| 23  | Workspace creator becomes `executive_approver`                          | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                                                                                       |
+| 24  | Audit events written by the service role through one helper             | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                                                                                       |
+| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade   | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                                                                                       |
+| 26  | Phase 1 is the first production module on a shared platform core        | Client requirement of 8 Oct 2026. Pricing, suppliers, submissions and agents must plug into one database, login, document store, audit trail, AI gateway and task engine instead of being rebuilt. Adds Milestone 1.5. |
+| 27  | Tenancy through `memberships`, not a company stored on the profile      | A consultant or group director can belong to several companies; adding a company becomes data, not code. Access follows the active membership (E1.5.2).                                                                |
+| 28  | One permission matrix in code; RLS keeps tenancy and sensitive writes   | Booklet roles are added to one table, not to every screen. The database still refuses cross-company access and forged writes if the app has a bug.                                                                     |
+| 29  | Files only as `documents` with immutable, SHA-256-hashed versions       | Evidence must be provable later (submission locks, disputes): the original is never overwritten or deleted, and the hash shows it is unchanged.                                                                        |
+| 30  | Background work in a Postgres `jobs` table with a job runner route      | No queue service to host or pay for. Claimed with `FOR UPDATE SKIP LOCKED`; future AI agents are new job types. Revisit if volume outgrows it.                                                                         |
+| 31  | Provider-neutral AI gateway; Claude is the first adapter                | Another provider is a new adapter, not a rewrite. One place logs model, tokens, cost and time in `ai_runs` (supersedes the single-provider wording of #17).                                                            |
+| 32  | Rules only from the tender; no default certification period             | Correction to the quote: age limits apply only when a tender states them, stored with page and quote. A silent tender applies no limit.                                                                                |
+| 33  | Archive, don't delete                                                   | Business records and evidence history are archived (`archived_at`), never hard-deleted, so past bids stay explainable.                                                                                                 |
+| 34  | Future-module tables designed now, created with their module            | The entity map (§10) keeps Phase 1 compatible with the full platform without carrying empty tables, migrations and RLS for features not yet built.                                                                     |
+| 35  | Active company: stored selection, validated against active memberships  | Access must never come from a value stored on the person. The helper uses the selection only to choose among active memberships (else oldest, else none), so a stale or forged value grants nothing.                   |
+| 36  | Session helpers in `private`, not `public`                              | In `public` they were API endpoints (`/rest/v1/rpc/…`) callable even by `anon`; the advisors flagged them. Policies still call them as the signed-in user.                                                             |
+| 37  | Memberships end by status `removed`; no DELETE grant, even service role | Archive, don't delete: who was a member, with which role, stays explainable. Cascades from deleting a person or company still remove rows.                                                                             |
+| 38  | Co-members cannot read a person's selected company                      | It would reveal another company that person belongs to (competing bidders). Column-level `SELECT` on `profiles`; `select *` on profiles now fails for users.                                                           |

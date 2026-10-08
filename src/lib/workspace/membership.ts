@@ -55,6 +55,20 @@ export const getMembership = cache(async (): Promise<Membership | null> => {
   };
 });
 
+/**
+ * Whether the signed-in person has a profile. Everyone gets one with their first
+ * company (onboarding), so a profile without an active membership means they used to
+ * belong to a company: removed from it, or the company was deleted. Onboarding is for
+ * first-time users only and refuses them.
+ */
+export async function hasProfile(): Promise<boolean> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.from("profiles").select("id").eq("id", user.id);
+  if (error) throw new Error(`Could not load your account: ${error.message}`);
+  return data.length > 0;
+}
+
 /** For every page inside the workspace: sends people without one to onboarding. */
 export async function requireMembership(): Promise<Membership> {
   const membership = await getMembership();
