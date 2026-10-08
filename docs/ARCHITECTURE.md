@@ -66,7 +66,7 @@ Route Handlers are used only for uploads, the job runner and AI work where neede
 | Platform core part                  | Status                                                                                  |
 | ----------------------------------- | --------------------------------------------------------------------------------------- |
 | Companies, memberships, permissions | Companies, memberships and the permission matrix **built** (T1.3, E1.4, E1.5.2, E1.5.3) |
-| Documents and versions              | Planned, E1.5.4                                                                         |
+| Documents and versions              | **Built** (E1.5.4)                                                                      |
 | Audit log and domain events         | Audit log **built** (E1, ticket E1.5); domain events E1.5.5                             |
 | Jobs and job runner                 | Planned, E1.5.5                                                                         |
 | AI gateway                          | Planned, E1.5.6                                                                         |
@@ -133,8 +133,8 @@ decision is a person's, and is logged. pgvector is not used in Phase 1.
 └── public/               # Static assets
 ```
 
-Built in E1.5: `src/lib/auth/permissions.ts` (permission matrix, E1.5.3). Planned in E1.5:
-`src/lib/documents/` (documents and versions, E1.5.4), `src/lib/jobs/` (domain events,
+Built in E1.5: `src/lib/auth/permissions.ts` (permission matrix, E1.5.3), `src/lib/documents/`
+(documents and versions, E1.5.4). Planned in E1.5: `src/lib/jobs/` (domain events,
 jobs and the job runner, E1.5.5), `src/lib/ai/` (AI gateway, E1.5.6).
 
 ---
@@ -399,7 +399,7 @@ person) links to `organizations` (the tenant) and carries the standard RLS polic
 | `domain_events`                  | Business events (document uploaded, tender read, requirement confirmed) that jobs and future agents react to.                                                                              | Planned, E1.5.5             |
 | `jobs`                           | Background work: type, status, attempts, result, error, linked record.                                                                                                                     | Planned, E1.5.5             |
 | `ai_runs`                        | Every AI call: provider, model, task, tokens, cost, time, outcome.                                                                                                                         | Planned, E1.5.6             |
-| `documents`, `document_versions` | Any file in the system (company or tender) with immutable versions, SHA-256 hash, storage location, uploader.                                                                              | Planned, E1.5.4             |
+| `documents`, `document_versions` | Any file in the system (company or tender) with immutable versions, SHA-256 hash, storage location, uploader.                                                                              | **Built** (E1.5.4)          |
 | `extracted_facts`                | Any fact read from any document: field, value, page, quote, confidence, which AI run or person, review status. Shared by Company DNA and the Digital Twin.                                 | Planned, E2.1               |
 | `evidence_items`                 | Company DNA: category (CSD, tax, B-BBEE, CIPC, CIDB, municipal…), the confirmed document version, issue and expiry dates, certification date.                                              | Planned, E2.1               |
 | `tenders`                        | Digital Twin core: kind (tender, RFQ, RFP, quotation), reference, issuer, closing and briefing dates, scoring system, stage. Optional link to a future opportunity.                        | Planned, E3.1               |
@@ -430,7 +430,7 @@ erDiagram
     TENDER_REQUIREMENTS ||--o{ REQUIREMENT_DECISIONS : "reviewed in"
 ```
 
-Built today: `organizations`, `profiles`, `memberships`, `audit_events` (detailed diagram below). Every
+Built today: `organizations`, `profiles`, `memberships`, `audit_events`, `documents`, `document_versions` (detailed diagrams below). Every
 other entity in this diagram is planned, in the ticket named in the table above.
 
 ### Table conventions
@@ -468,16 +468,18 @@ Every table follows these, now and in future modules (Architecture rules in `doc
 
 Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 
-| Migration                                           | Ticket  | Adds                                                                                            |
-| --------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `20260908133617_init_organizations_profiles_rbac`   | T1.3    | `organizations`, `profiles`, `app_role`, RLS, anti-escalation                                   |
-| `20261008132310_onboarding_create_workspace`        | E1.4    | `private` schema, `private.create_workspace`, `complete_onboarding`                             |
-| `20261008132832_onboarding_reject_whitespace_names` | E1.4    | names must contain visible text (tabs/newlines no longer pass)                                  |
-| `20261008133132_audit_events`                       | E1 E1.5 | append-only `audit_events`, read own org only                                                   |
-| `20261008153917_memberships`                        | E1.5.2  | `memberships`, `membership_status`, `profiles.active_organization_id`, backfill from profiles   |
-| `20261008154447_access_follows_active_membership`   | E1.5.2  | helpers in `private` read the active membership; every policy re-pointed; `switch_organization` |
-| `20261008154918_drop_profile_company_and_role`      | E1.5.2  | drops `profiles.organization_id` and `profiles.role`; profile guard now on the selection        |
-| `20261008160107_viewer_role`                        | E1.5.3  | `viewer` added to `app_role`                                                                    |
+| Migration                                           | Ticket  | Adds                                                                                                                   |
+| --------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `20260908133617_init_organizations_profiles_rbac`   | T1.3    | `organizations`, `profiles`, `app_role`, RLS, anti-escalation                                                          |
+| `20261008132310_onboarding_create_workspace`        | E1.4    | `private` schema, `private.create_workspace`, `complete_onboarding`                                                    |
+| `20261008132832_onboarding_reject_whitespace_names` | E1.4    | names must contain visible text (tabs/newlines no longer pass)                                                         |
+| `20261008133132_audit_events`                       | E1 E1.5 | append-only `audit_events`, read own org only                                                                          |
+| `20261008153917_memberships`                        | E1.5.2  | `memberships`, `membership_status`, `profiles.active_organization_id`, backfill from profiles                          |
+| `20261008154447_access_follows_active_membership`   | E1.5.2  | helpers in `private` read the active membership; every policy re-pointed; `switch_organization`                        |
+| `20261008154918_drop_profile_company_and_role`      | E1.5.2  | drops `profiles.organization_id` and `profiles.role`; profile guard now on the selection                               |
+| `20261008160107_viewer_role`                        | E1.5.3  | `viewer` added to `app_role`                                                                                           |
+| `20261008161132_documents_and_versions`             | E1.5.4  | `documents`, `document_versions`, `add_document_version`, `forbid_row_changes`, `documents` bucket and its read policy |
+| `20261008162257_document_version_dedupe_and_audit`  | E1.5.4  | duplicate re-check under a lock, ignoring archived documents; audit entry in the same transaction                      |
 
 ```mermaid
 erDiagram
@@ -575,12 +577,15 @@ one company at a time, and sees only that company's data.
 
 RLS is enabled on every table. `anon` is granted nothing.
 
-| Table           | SELECT                                                                                                        | INSERT                                         | UPDATE                                                                                      | DELETE                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `organizations` | the active company only                                                                                       | **denied**                                     | active company, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied**                                                    |
-| `profiles`      | yourself, and people with a membership in the active company; columns `id, full_name, created_at, updated_at` | **denied**                                     | own row only, and only `full_name`                                                          | **denied**                                                    |
-| `memberships`   | your own (any company), and every membership in the active company                                            | **denied**                                     | **denied** (service role only)                                                              | **denied to everyone** (only cascades with person or company) |
-| `audit_events`  | active company only                                                                                           | **denied** (service role via the audit helper) | **denied to everyone**                                                                      | **denied to everyone** (only cascades with its organization)  |
+| Table                                  | SELECT                                                                                                        | INSERT                                               | UPDATE                                                                                      | DELETE                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `organizations`                        | the active company only                                                                                       | **denied**                                           | active company, `bid_manager` or `executive_approver` only, and only the 4 business columns | **denied**                                                    |
+| `profiles`                             | yourself, and people with a membership in the active company; columns `id, full_name, created_at, updated_at` | **denied**                                           | own row only, and only `full_name`                                                          | **denied**                                                    |
+| `memberships`                          | your own (any company), and every membership in the active company                                            | **denied**                                           | **denied** (service role only)                                                              | **denied to everyone** (only cascades with person or company) |
+| `audit_events`                         | active company only                                                                                           | **denied** (service role via the audit helper)       | **denied to everyone**                                                                      | **denied to everyone** (only cascades with its organization)  |
+| `documents`                            | active company only                                                                                           | **denied** (service role via `add_document_version`) | **denied** (service role: title, category, archive)                                         | **denied to everyone** (only cascades with its organization)  |
+| `document_versions`                    | active company only                                                                                           | **denied** (service role via `add_document_version`) | **denied to everyone**                                                                      | **denied to everyone** (only cascades with its document)      |
+| `storage.objects` (`documents` bucket) | files in the active company's folder                                                                          | **denied** (service role)                            | **denied**                                                                                  | **denied**                                                    |
 
 INSERT and DELETE are denied to all user roles on these tables. That is intentional:
 inserting a membership or profile is how a user would otherwise put themselves into a
@@ -694,6 +699,89 @@ the caller and can never attach anyone to an existing company. All inserts happe
 function call, so a failure leaves none behind. The first member is `executive_approver`
 (the company's owner); later members arrive by invitation, which is not in Phase 1.
 
+### Documents and files (E1.5.4)
+
+Every file in the system is a `documents` row (company or tender document) with one or more
+immutable `document_versions`. A renewed certificate is a new version; the old one stays.
+
+```mermaid
+erDiagram
+    ORGANIZATIONS ||--o{ DOCUMENTS : "organization_id (FK, on delete cascade)"
+    DOCUMENTS ||--|{ DOCUMENT_VERSIONS : "(document_id, organization_id) (FK, cascade)"
+    DOCUMENTS |o--o| DOCUMENT_VERSIONS : "current_version_id (same document)"
+
+    DOCUMENTS {
+        uuid id PK
+        uuid organization_id FK "NOT NULL"
+        document_kind kind "company | tender"
+        text title "NOT NULL, 1-300 visible chars"
+        text category "nullable slug, list defined in E2"
+        uuid current_version_id FK "newest version, set by add_document_version"
+        uuid created_by "no FK"
+        timestamptz created_at
+        timestamptz updated_at "trigger-maintained"
+        timestamptz archived_at "archive, never delete"
+    }
+
+    DOCUMENT_VERSIONS {
+        uuid id PK
+        uuid organization_id "NOT NULL, = the document's"
+        uuid document_id FK "NOT NULL"
+        int version_number "1, 2, 3... per document"
+        text storage_path "UNIQUE, = org/document/version id"
+        text sha256 "64 hex"
+        bigint size_bytes "> 0"
+        text mime_type "sniffed from the bytes"
+        text original_file_name
+        uuid uploaded_by "no FK"
+        timestamptz uploaded_at
+    }
+```
+
+**Immutable, at three layers.** Users hold only `SELECT`. The service role holds `SELECT,
+INSERT` on versions and `SELECT, INSERT, UPDATE` on documents, and no `DELETE` on either.
+The `private.forbid_row_changes` trigger (shared by every append-only table) refuses any
+update, delete or truncate of a version, and any delete of a document, even by the table
+owner, except the cascade when a whole company is deleted. Documents are archived
+(`archived_at`); an archived document takes no new versions.
+
+**One write path.** `public.add_document_version` (service role only) creates the document if
+asked, locks it, gives the version the next number, makes it current and writes the
+`document.uploaded` audit entry, all in one transaction. It takes a transaction-scoped
+advisory lock on (company, SHA-256) and refuses a file whose exact bytes are already stored
+in the company (outside archived documents) with `PT409` (HTTP 409), so two simultaneous
+uploads of the same file store it once. The storage path is fixed by a check constraint to
+`{organization_id}/{document_id}/{version_id}`.
+
+**The helper.** `uploadDocumentFile` (`src/lib/documents/upload.ts`, server only) checks
+`documents.upload`, then calls `storeDocumentVersion` (`store.ts`) with the service-role
+client and the session's company:
+
+1. validate; sniff the real type from the first bytes (PDF, JPEG, PNG, WebP; the declared
+   type and file name are ignored); 50 MB at most;
+2. for a new version, the document must exist in the company and not be archived;
+3. SHA-256 the bytes; if the company already has them (outside archived documents), return
+   `duplicate` with the existing document, storing nothing;
+4. upload to the private `documents` bucket at a fresh path (`upsert: false`);
+5. record it with `add_document_version`; if that fails, remove the just-uploaded file
+   (it was never an original) and map `PT409` to `duplicate`.
+
+Expected refusals throw `DocumentStoreError` (`invalid_file`, `not_found`, `archived`) with
+a message that can be shown as is.
+
+**Storage.** Private bucket `documents` (50 MB, PDF/JPEG/PNG/WebP only). One policy on
+`storage.objects`: members may read (download, list, signed URL) objects whose first folder
+is their active company. There is no INSERT, UPDATE or DELETE policy, so nobody uploads,
+overwrites or deletes through the API, not even in their own company. Files are not tied to
+rows by a foreign key: deleting a company does not delete its files (the tests remove their
+own). Postgres cannot stop the service key deleting a storage object through the Storage
+API; no server code does, except removing a file whose version was never recorded.
+
+**Limits to know in E2.** A Vercel function accepts a request body of at most 4.5 MB, so a
+Server Action can pass only files up to that size; larger scans need a direct upload to a
+staging path (a narrowly scoped storage policy) that the server then hashes and records.
+No UI exists yet; E2.2 builds the upload screens on `uploadDocumentFile`.
+
 ### Audit log (E1, ticket E1.5)
 
 `audit_events` records who did what, to which record, in which company. It is append-only
@@ -708,13 +796,14 @@ at three layers:
 3. **RLS.** Members read their own organization's events only.
 
 Rows are written by one helper, `recordAuditEvent` in `src/lib/audit/record.ts`, with the
-service role. Users get no INSERT privilege because they could otherwise forge entries in
+service role, except where a database function makes the change: it writes its own entry in
+the same transaction (`add_document_version` writes `document.uploaded`). Users get no INSERT privilege because they could otherwise forge entries in
 their own company's log through the API. The helper accepts only the action, entity id and
 details. The organization comes from the caller's own membership (read through RLS), and
 the actor comes from the verified JWT. Details never contain ID numbers, bank details or
 document contents.
 
-Logged so far: `workspace.created` (onboarding). Trade-off: the workspace and its event are
+Logged so far: `workspace.created` (onboarding), `document.uploaded` (every stored version). Trade-off: the workspace and its event are
 two writes, not one transaction, so a database failure between them loses that one event
 (logged to the server log). If that ever matters, move the insert into
 `private.create_workspace`.
@@ -722,7 +811,7 @@ two writes, not one transaction, so a database failure between them loses that o
 ### Verification
 
 `npm run verify:rls` (`scripts/verify-rls.ts`) provisions organizations and users and asserts
-tenant isolation over the wire, as those users, through PostgREST. **39/39** as of E1.5.2.
+tenant isolation over the wire, as those users, through PostgREST. **51/51** as of E1.5.4.
 Cases that must fail: self-promotion and moving a membership to another company,
 organization creation, cross-tenant read and rename; onboarding twice, a second workspace,
 joining another company, blank or whitespace-only names, anonymous onboarding, and calling
@@ -733,7 +822,12 @@ their role follows it; co-members do not see their other memberships; switching 
 company without a membership, adding oneself to a company, raising one's own role, setting
 the selection directly, using a removed membership, a forged stored selection, and reaching
 the session helpers through the API all fail; with no active membership a person sees
-nothing. The forged-selection check was mutation-tested: a helper that trusts the stored
+nothing. Viewer (E1.5.3): reads only its company, cannot edit it. Documents and files
+(E1.5.4): no cross-company read of documents, versions or files (download, list, signed
+URL); no direct document or version insert, no call to `add_document_version`, no change to
+a version even by the service role, no document deletion; no upload, overwrite or delete of
+files through the API, in another company or one's own. Mutation-tested: a storage policy
+without the company folder fails the cross-company file check. The forged-selection check was mutation-tested: a helper that trusts the stored
 value fails three checks. The run deletes everything it created, sweeping by its run suffix
 so even a wrongly created organization is removed.
 
@@ -866,3 +960,7 @@ What Phase 1 builds and which later modules reuse it.
 | 37  | Memberships end by status `removed`; no DELETE grant, even service role | Archive, don't delete: who was a member, with which role, stays explainable. Cascades from deleting a person or company still remove rows.                                                                                         |
 | 38  | Co-members cannot read a person's selected company                      | It would reveal another company that person belongs to (competing bidders). Column-level `SELECT` on `profiles`; `select *` on profiles now fails for users.                                                                       |
 | 39  | Permission matrix as typed code, not a database table                   | One reviewed place, checked by the compiler and unit tests, read without a query. Roles live in the `app_role` enum; a test keeps the one role-listing policy in sync. A table can come with configurable roles in the SaaS stage. |
+| 40  | Files written by the service role through one helper and one function   | Users could otherwise record a hash that does not match the file. The database function makes document, version, current pointer and audit entry one transaction.                                                                  |
+| 41  | File type sniffed from the bytes, never from the name or browser        | A renamed file would otherwise be stored and served under the wrong type. Only what the AI reads natively is accepted (PDF, JPEG, PNG, WebP).                                                                                      |
+| 42  | Duplicates per company, re-checked under an advisory lock               | The app check alone let two simultaneous uploads through. Not a unique index: archived documents must not block the same file, and a lock keeps it explicit.                                                                       |
+| 43  | Audit entries for database-function changes written in the function     | A separate audit call after the write could fail and, on retry, never be made (the retry is a duplicate). Same transaction, same company as the row.                                                                               |

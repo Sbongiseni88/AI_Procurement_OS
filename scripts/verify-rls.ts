@@ -1,6 +1,6 @@
 /**
  * RLS verification (T1.3, extended per ticket: E1.4 onboarding, E1.5 audit log,
- * E1.5.2 memberships).
+ * E1.5.2 memberships, E1.5.3 viewer, E1.5.4 documents and file storage).
  *
  * `tsc` cannot test SQL, so tenant isolation has to be proven against a real
  * database. This script provisions two organizations with one user each, then
@@ -13,6 +13,8 @@
  * Run with:  npm run verify:rls
  * Fixtures are always torn down, including on failure.
  */
+import { createHash, randomUUID } from "node:crypto";
+
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 function requireEnv(name: string): string {
@@ -64,7 +66,11 @@ async function signIn(email: string): Promise<SupabaseClient> {
 type Role = "bid_manager" | "pricing_specialist" | "executive_approver" | "viewer";
 
 async function main(): Promise<void> {
-  const created = { userIds: [] as string[], orgIds: [] as string[] };
+  const created = {
+    userIds: [] as string[],
+    orgIds: [] as string[],
+    storagePaths: [] as string[],
+  };
 
   /**
    * A confirmed person with a profile and an active membership in each company
@@ -449,6 +455,199 @@ async function main(): Promise<void> {
       cEvents.error?.message ?? `got ${cEvents.data?.length} rows`,
     );
 
+    // ---- Documents and file storage (E1.5.4) ---------------------------------
+    console.log("\nDocuments, versions and files:");
+    const BUCKET = "documents";
+    const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+    /** One stored company document, made the way the server helper makes it. */
+    async function seedDocument(orgId: string, label: string) {
+      const documentId = randomUUID();
+      const versionId = randomUUID();
+      const path = `${orgId}/${documentId}/${versionId}`;
+      const bytes = new TextEncoder().encode(`%PDF-1.4\n% verify-rls ${RUN} ${label}\n%%EOF\n`);
+      const up = await admin.storage
+        .from(BUCKET)
+        .upload(path, bytes, { contentType: "application/pdf" });
+      if (up.error) throw new Error(`file upload failed: ${up.error.message}`);
+      created.storagePaths.push(path);
+      const rec = await admin.rpc("add_document_version", {
+        p_organization_id: orgId,
+        p_document_id: documentId,
+        p_version_id: versionId,
+        p_sha256: sha256(bytes),
+        p_size_bytes: bytes.byteLength,
+        p_mime_type: "application/pdf",
+        p_original_file_name: `${label}.pdf`,
+        p_uploaded_by: null,
+        p_new_kind: "company",
+        p_new_title: `${label} ${RUN}`,
+        p_new_category: "csd",
+      });
+      if (rec.error) throw new Error(`version record failed: ${rec.error.message}`);
+      return { documentId, versionId, path, bytes };
+    }
+    async function bytesOf(client: SupabaseClient, path: string): Promise<Uint8Array | null> {
+      const r = await client.storage.from(BUCKET).download(path);
+      return r.error || !r.data ? null : new Uint8Array(await r.data.arrayBuffer());
+    }
+
+    const docA = await seedDocument(orgA.id, "Alpha CSD");
+    const docB = await seedDocument(orgB.id, "Beta CSD");
+
+    const aDocs = await a.from("documents").select("id, organization_id");
+    const aVersions = await a.from("document_versions").select("id, organization_id");
+    check(
+      "a member reads its own company's documents and versions only",
+      !aDocs.error &&
+        aDocs.data.some((d) => d.id === docA.documentId) &&
+        aDocs.data.every((d) => d.organization_id === orgA.id) &&
+        !aVersions.error &&
+        aVersions.data.some((v) => v.id === docA.versionId) &&
+        aVersions.data.every((v) => v.organization_id === orgA.id),
+      aDocs.error?.message ?? aVersions.error?.message ?? `docs=${aDocs.data?.length}`,
+    );
+
+    const aReadsBDoc = await a.from("documents").select("id").eq("id", docB.documentId);
+    const aReadsBVersion = await a.from("document_versions").select("id").eq("id", docB.versionId);
+    check(
+      "a member CANNOT read another company's document or version by id",
+      aReadsBDoc.data?.length === 0 && aReadsBVersion.data?.length === 0,
+      `doc=${aReadsBDoc.data?.length} version=${aReadsBVersion.data?.length}`,
+    );
+
+    const aInsertsDoc = await a
+      .from("documents")
+      .insert({ organization_id: orgA.id, kind: "company", title: "Forged" });
+    const aInsertsVersion = await a.from("document_versions").insert({
+      organization_id: orgA.id,
+      document_id: docA.documentId,
+      version_number: 9,
+      storage_path: `${orgA.id}/${docA.documentId}/${randomUUID()}`,
+      sha256: "0".repeat(64),
+      size_bytes: 1,
+      mime_type: "application/pdf",
+      original_file_name: "forged.pdf",
+    });
+    const aRpc = await a.rpc("add_document_version", {
+      p_organization_id: orgA.id,
+      p_document_id: docA.documentId,
+      p_version_id: randomUUID(),
+      p_sha256: "0".repeat(64),
+      p_size_bytes: 1,
+      p_mime_type: "application/pdf",
+      p_original_file_name: "forged.pdf",
+      p_uploaded_by: null,
+    });
+    check(
+      "a member CANNOT create documents or versions directly (no forged hashes)",
+      aInsertsDoc.error !== null && aInsertsVersion.error !== null && aRpc.error !== null,
+      `doc: ${aInsertsDoc.error?.code ?? "INSERTED"}; version: ${aInsertsVersion.error?.code ?? "INSERTED"}; rpc: ${aRpc.error?.code ?? "CALLED"}`,
+    );
+
+    const aEditsVersion = await a
+      .from("document_versions")
+      .update({ sha256: "f".repeat(64) })
+      .eq("id", docA.versionId)
+      .select("id");
+    const aArchives = await a
+      .from("documents")
+      .update({ archived_at: new Date().toISOString() })
+      .eq("id", docA.documentId)
+      .select("id");
+    check(
+      "a member CANNOT change a version or a document",
+      (aEditsVersion.error !== null || aEditsVersion.data?.length === 0) &&
+        (aArchives.error !== null || aArchives.data?.length === 0),
+      `version: ${aEditsVersion.error?.code ?? aEditsVersion.data?.length}; document: ${aArchives.error?.code ?? aArchives.data?.length}`,
+    );
+
+    const svcEdit = await admin
+      .from("document_versions")
+      .update({ sha256: "f".repeat(64) })
+      .eq("id", docA.versionId);
+    const svcDeleteVersion = await admin
+      .from("document_versions")
+      .delete()
+      .eq("id", docA.versionId);
+    const svcDeleteDoc = await admin.from("documents").delete().eq("id", docA.documentId);
+    const versionAfter = await admin
+      .from("document_versions")
+      .select("sha256")
+      .eq("id", docA.versionId)
+      .single();
+    check(
+      "even the service role CANNOT change or delete a version, or delete a document",
+      svcEdit.error !== null &&
+        svcDeleteVersion.error !== null &&
+        svcDeleteDoc.error !== null &&
+        versionAfter.data?.sha256 === sha256(docA.bytes),
+      `edit: ${svcEdit.error?.code ?? "ALLOWED"}; delete version: ${svcDeleteVersion.error?.code ?? "ALLOWED"}; delete document: ${svcDeleteDoc.error?.code ?? "ALLOWED"}`,
+    );
+
+    const ownBytes = await bytesOf(a, docA.path);
+    const ownList = await a.storage.from(BUCKET).list(`${orgA.id}/${docA.documentId}`);
+    const ownSigned = await a.storage.from(BUCKET).createSignedUrl(docA.path, 60);
+    check(
+      "a member downloads, lists and links its own company's file",
+      ownBytes !== null &&
+        sha256(ownBytes) === sha256(docA.bytes) &&
+        !ownList.error &&
+        ownList.data.length === 1 &&
+        !ownSigned.error,
+      `download=${ownBytes === null ? "FAILED" : "ok"} list=${ownList.data?.length ?? ownList.error?.message} signed=${ownSigned.error?.message ?? "ok"}`,
+    );
+
+    const crossBytes = await bytesOf(a, docB.path);
+    const crossList = await a.storage.from(BUCKET).list(orgB.id);
+    const crossDocList = await a.storage.from(BUCKET).list(`${orgB.id}/${docB.documentId}`);
+    const crossSigned = await a.storage.from(BUCKET).createSignedUrl(docB.path, 60);
+    check(
+      "a member CANNOT download, list or link another company's file",
+      crossBytes === null &&
+        (crossList.error !== null || crossList.data.length === 0) &&
+        (crossDocList.error !== null || crossDocList.data.length === 0) &&
+        crossSigned.error !== null,
+      `download=${crossBytes === null ? "blocked" : "READ — CRITICAL"} list=${crossList.data?.length} docList=${crossDocList.data?.length} signed=${crossSigned.error ? "blocked" : "ISSUED — CRITICAL"}`,
+    );
+
+    const evil = new TextEncoder().encode(`%PDF-1.4\n% overwritten by A ${RUN}\n`);
+    const overwrite = await a.storage
+      .from(BUCKET)
+      .upload(docB.path, evil, { contentType: "application/pdf", upsert: true });
+    const updateB = await a.storage
+      .from(BUCKET)
+      .update(docB.path, evil, { contentType: "application/pdf" });
+    const removeB = await a.storage.from(BUCKET).remove([docB.path]);
+    const bAfter = await bytesOf(admin, docB.path);
+    check(
+      "a member CANNOT overwrite or delete another company's file",
+      overwrite.error !== null &&
+        updateB.error !== null &&
+        bAfter !== null &&
+        sha256(bAfter) === sha256(docB.bytes),
+      `upsert: ${overwrite.error ? "blocked" : "ALLOWED"}; update: ${updateB.error ? "blocked" : "ALLOWED"}; remove: ${removeB.error ? "blocked" : `${removeB.data?.length ?? 0} removed`}; file ${bAfter === null ? "GONE — CRITICAL" : sha256(bAfter) === sha256(docB.bytes) ? "intact" : "CHANGED — CRITICAL"}`,
+    );
+
+    const ownPath = `${orgA.id}/${docA.documentId}/${randomUUID()}`;
+    const ownUpload = await a.storage
+      .from(BUCKET)
+      .upload(ownPath, evil, { contentType: "application/pdf" });
+    if (!ownUpload.error) created.storagePaths.push(ownPath);
+    const ownOverwrite = await a.storage
+      .from(BUCKET)
+      .upload(docA.path, evil, { contentType: "application/pdf", upsert: true });
+    await a.storage.from(BUCKET).remove([docA.path]);
+    const aAfter = await bytesOf(admin, docA.path);
+    check(
+      "a member CANNOT upload, overwrite or delete files even in its own company (server helper only)",
+      ownUpload.error !== null &&
+        ownOverwrite.error !== null &&
+        aAfter !== null &&
+        sha256(aAfter) === sha256(docA.bytes),
+      `upload: ${ownUpload.error ? "blocked" : "ALLOWED"}; upsert: ${ownOverwrite.error ? "blocked" : "ALLOWED"}; file ${aAfter === null ? "GONE" : "present"}`,
+    );
+
     // ---- Memberships (E1.5.2) -------------------------------------------------
     console.log(
       "\nMemberships — user X, active member of A (bid_manager) and B (pricing_specialist):",
@@ -652,6 +851,16 @@ async function main(): Promise<void> {
         (anonMemberships.error !== null || anonMemberships.data?.length === 0),
       `switch: ${anonSwitch.error?.code ?? "ALLOWED"}; memberships: ${anonMemberships.error?.code ?? anonMemberships.data?.length}`,
     );
+    const anonDocs = await anon.from("documents").select("id");
+    const anonVersions = await anon.from("document_versions").select("id");
+    const anonFile = await anon.storage.from("documents").download(docA.path);
+    check(
+      "anonymous callers see no documents, versions or files",
+      (anonDocs.error !== null || anonDocs.data?.length === 0) &&
+        (anonVersions.error !== null || anonVersions.data?.length === 0) &&
+        anonFile.error !== null,
+      `documents: ${anonDocs.error?.code ?? anonDocs.data?.length}; file: ${anonFile.error ? "blocked" : "READ — CRITICAL"}`,
+    );
     const anonProfiles = await anon.from("profiles").select("id");
     check(
       "anonymous callers see no profiles",
@@ -663,6 +872,14 @@ async function main(): Promise<void> {
   } finally {
     // ---- Teardown ----------------------------------------------------------
     console.log("\nTeardown:");
+    // Files are not tied to rows by a foreign key, so they go explicitly.
+    if (created.storagePaths.length > 0) {
+      const { data, error } = await admin.storage.from("documents").remove(created.storagePaths);
+      if (error) cleanupFailures += 1;
+      console.log(
+        `  files ${error ? `NOT removed: ${error.message}` : `${data.length}/${created.storagePaths.length} removed`}`,
+      );
+    }
     for (const id of created.userIds) {
       const { error } = await admin.auth.admin.deleteUser(id);
       if (error) cleanupFailures += 1;

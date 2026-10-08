@@ -7,9 +7,10 @@ import { type Json } from "@/lib/supabase/database.types";
 import { requireMembership } from "@/lib/workspace/membership";
 
 /**
- * Every audited action, named `<entity>.<past-tense verb>`, with the entity type it
- * acts on. Add new ones as tickets introduce them (uploads E2.2, confirmations
- * E2.6, overrides E4.3).
+ * Every action audited through this helper, named `<entity>.<past-tense verb>`, with the
+ * entity type it acts on. Add new ones as tickets introduce them (confirmations E2.5,
+ * overrides E4.4). Database functions that make a material change write their own entry
+ * in the same transaction instead (`document.uploaded` by `add_document_version`).
  */
 const AUDIT_ACTION_NAMES = ["workspace.created"] as const;
 

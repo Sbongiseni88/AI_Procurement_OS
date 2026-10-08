@@ -80,6 +80,110 @@ export type Database = {
           },
         ]
       }
+      document_versions: {
+        Row: {
+          document_id: string
+          id: string
+          mime_type: string
+          organization_id: string
+          original_file_name: string
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          uploaded_at: string
+          uploaded_by: string | null
+          version_number: number
+        }
+        Insert: {
+          document_id: string
+          id?: string
+          mime_type: string
+          organization_id: string
+          original_file_name: string
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          uploaded_at?: string
+          uploaded_by?: string | null
+          version_number: number
+        }
+        Update: {
+          document_id?: string
+          id?: string
+          mime_type?: string
+          organization_id?: string
+          original_file_name?: string
+          sha256?: string
+          size_bytes?: number
+          storage_path?: string
+          uploaded_at?: string
+          uploaded_by?: string | null
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_versions_document_fkey"
+            columns: ["document_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          archived_at: string | null
+          category: string | null
+          created_at: string
+          created_by: string | null
+          current_version_id: string | null
+          id: string
+          kind: Database["public"]["Enums"]["document_kind"]
+          organization_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_version_id?: string | null
+          id?: string
+          kind: Database["public"]["Enums"]["document_kind"]
+          organization_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_version_id?: string | null
+          id?: string
+          kind?: Database["public"]["Enums"]["document_kind"]
+          organization_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_current_version_fkey"
+            columns: ["current_version_id", "id"]
+            isOneToOne: false
+            referencedRelation: "document_versions"
+            referencedColumns: ["id", "document_id"]
+          },
+          {
+            foreignKeyName: "documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       memberships: {
         Row: {
           created_at: string
@@ -195,6 +299,40 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_document_version: {
+        Args: {
+          p_document_id: string
+          p_mime_type: string
+          p_new_category?: string
+          p_new_kind?: Database["public"]["Enums"]["document_kind"]
+          p_new_title?: string
+          p_organization_id: string
+          p_original_file_name: string
+          p_sha256: string
+          p_size_bytes: number
+          p_uploaded_by: string
+          p_version_id: string
+        }
+        Returns: {
+          document_id: string
+          id: string
+          mime_type: string
+          organization_id: string
+          original_file_name: string
+          sha256: string
+          size_bytes: number
+          storage_path: string
+          uploaded_at: string
+          uploaded_by: string | null
+          version_number: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_versions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       complete_onboarding: {
         Args: { company_name: string; full_name: string }
         Returns: string
@@ -210,6 +348,7 @@ export type Database = {
         | "pricing_specialist"
         | "executive_approver"
         | "viewer"
+      document_kind: "company" | "tender"
       membership_status: "invited" | "active" | "removed"
     }
     CompositeTypes: {
@@ -347,6 +486,7 @@ export const Constants = {
         "executive_approver",
         "viewer",
       ],
+      document_kind: ["company", "tender"],
       membership_status: ["invited", "active", "removed"],
     },
   },
