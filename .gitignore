@@ -15,6 +15,8 @@
 /test-results/
 /playwright-report/
 /blob-report/
+# Throwaway build copy made by tests/e2e/server-only-leak.spec.ts
+/.leak-probe/
 
 # next.js
 /.next/

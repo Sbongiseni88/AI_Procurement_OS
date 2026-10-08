@@ -48,7 +48,7 @@
 **Session start:** read CLAUDE.md, this epic, ARCHITECTURE.md §4 (Next.js 16 constraints), §7 (Supabase clients), §8 (data model). Skills: `supabase`, `frontend-design`, `react-best-practices`.
 
 - `[DONE]` **E1.1** — Housekeeping. Commit the pending docs/config changes on `feat/t1.3-schema-rls`, review the branch against `main`, merge it into `main` (last branch merge; from here on we work directly on `main`), push, and delete the branch. It carries the T1.3 migration, `verify:rls`, project skills, `.gitignore`, CLAUDE.md and this task board. _(2026-10-08 14:45 SAST)_ The branch was already fully contained in `main` (pending changes committed as `f8bd5f4`, `7a6e984`, `36f365c`), so no merge commit was needed; `main` pushed and the branch deleted locally and on the remote.
-- `[TODO]` **E1.2** — Playwright harness: `@playwright/test`, `playwright.config.ts`, `tests/e2e/`, `test:e2e` script, one smoke test. Include the `server-only` leak probe (importing `admin.ts` from a Client Component must fail the build).
+- `[DONE]` **E1.2** — Playwright harness: `@playwright/test`, `playwright.config.ts`, `tests/e2e/`, `test:e2e` script, one smoke test. Include the `server-only` leak probe (importing `admin.ts` from a Client Component must fail the build). _(2026-10-08 15:00 SAST)_
 - `[TODO]` **E1.3** — Auth: sign up, log in, log out, password reset email. Route protection in `proxy.ts`.
   - Must apply the `no-store` cache headers `@supabase/ssr` passes as `setAll`'s second argument (T1.2 review finding); E2E asserts it.
   - Move `SUPABASE_PROJECT_ID` out of the runtime env schema (T1.2 cleanup).
@@ -161,9 +161,10 @@ Bid / no-bid engine · BOQ and pricing scenarios (VAT, markup vs margin) · MBD 
 
 ## Completion log
 
-| Task | Completed             | Branch                      | Verification                                                                                                                                            |
-| ---- | --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1.1 | 2026-09-08 10:07 SAST | `feat/t1.1-project-init`    | `typecheck` ✅ · `lint` ✅ · `build` ✅                                                                                                                 |
-| T1.2 | 2026-09-08 15:15 SAST | `feat/t1.2-supabase-client` | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · live client smoke test ✅ · env guards ✅ · `server-only` leak probe ✅                         |
-| T1.3 | 2026-09-08 15:47 SAST | `feat/t1.3-schema-rls`      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · migration applied to hosted DB ✅ · `verify:rls` 12/12 ✅ · generated types enforce schema ✅   |
-| E1.1 | 2026-10-08 14:45 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `verify:rls` 12/12 on hosted DB ✅ · branch already contained in `main`; deleted local + remote |
+| Task | Completed             | Branch                      | Verification                                                                                                                                                                                |
+| ---- | --------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1.1 | 2026-09-08 10:07 SAST | `feat/t1.1-project-init`    | `typecheck` ✅ · `lint` ✅ · `build` ✅                                                                                                                                                     |
+| T1.2 | 2026-09-08 15:15 SAST | `feat/t1.2-supabase-client` | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · live client smoke test ✅ · env guards ✅ · `server-only` leak probe ✅                                                             |
+| T1.3 | 2026-09-08 15:47 SAST | `feat/t1.3-schema-rls`      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · migration applied to hosted DB ✅ · `verify:rls` 12/12 ✅ · generated types enforce schema ✅                                       |
+| E1.1 | 2026-10-08 14:45 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `verify:rls` 12/12 on hosted DB ✅ · branch already contained in `main`; deleted local + remote                                     |
+| E1.2 | 2026-10-08 15:00 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:e2e` 2/2 ✅ (smoke + `server-only` leak probe; build fails as expected, tree left clean, `typecheck` still passes afterwards) |

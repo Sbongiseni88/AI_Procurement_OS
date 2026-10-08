@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -8,16 +8,46 @@ import { expect, test } from "@playwright/test";
  * The `server-only` guard (ARCHITECTURE.md §7) is what keeps the RLS-bypassing secret
  * key out of the browser bundle. This test proves it still works: it adds a Client
  * Component that imports `admin.ts`, runs a production build, and expects the build
- * to FAIL. The probe is removed in `finally` and again in `afterAll`, so the tree is
- * restored even when the build hangs or the assertion fails.
+ * to FAIL.
  *
- * It does not touch the dev server: `next dev` compiles routes on demand and writes to
- * `.next/dev`, while `next build` writes to `.next` (Next 16 runs them side by side).
+ * The build runs in a throwaway copy (`.leak-probe/`, git-ignored) rather than in
+ * `src/app`: a probe page in the real tree is picked up by the running dev server and
+ * by `.next/types`, whose generated route types would keep pointing at it after it is
+ * deleted and break `npm run typecheck`. The copy is removed in `finally` and again in
+ * `beforeAll`/`afterAll`, so nothing is left behind even when the test fails.
  */
-const PROBE_DIR = path.join(process.cwd(), "src", "app", "server-only-leak-probe");
+const ROOT = process.cwd();
+const PROBE_ROOT = path.join(ROOT, ".leak-probe");
+const COPIED = ["src", "tsconfig.json", "next.config.ts", "postcss.config.mjs", "package.json"];
 
 function removeProbe(): void {
-  rmSync(PROBE_DIR, { recursive: true, force: true });
+  rmSync(PROBE_ROOT, { recursive: true, force: true });
+}
+
+function createProbeProject(): void {
+  mkdirSync(PROBE_ROOT, { recursive: true });
+  for (const entry of COPIED) {
+    cpSync(path.join(ROOT, entry), path.join(PROBE_ROOT, entry), { recursive: true });
+  }
+  // Inside the repo, so Turbopack's project root (the lockfile's directory) still
+  // contains the real node_modules this symlink resolves to.
+  symlinkSync(path.join(ROOT, "node_modules"), path.join(PROBE_ROOT, "node_modules"), "dir");
+
+  const probeDir = path.join(PROBE_ROOT, "src", "app", "server-only-leak-probe");
+  mkdirSync(probeDir, { recursive: true });
+  writeFileSync(
+    path.join(probeDir, "page.tsx"),
+    [
+      '"use client";',
+      "",
+      'import { createSupabaseAdminClient } from "@/lib/supabase/admin";',
+      "",
+      "export default function Probe() {",
+      "  return <p>{typeof createSupabaseAdminClient}</p>;",
+      "}",
+      "",
+    ].join("\n"),
+  );
 }
 
 test.describe("server-only guard", () => {
@@ -33,24 +63,15 @@ test.describe("server-only guard", () => {
   });
 
   test("importing admin.ts from a Client Component fails the build", () => {
-    mkdirSync(PROBE_DIR, { recursive: true });
     try {
-      writeFileSync(
-        path.join(PROBE_DIR, "page.tsx"),
-        [
-          '"use client";',
-          "",
-          'import { createSupabaseAdminClient } from "@/lib/supabase/admin";',
-          "",
-          "export default function Probe() {",
-          "  return <p>{typeof createSupabaseAdminClient}</p>;",
-          "}",
-          "",
-        ].join("\n"),
-      );
+      createProbeProject();
 
-      const build = spawnSync("npx", ["next", "build"], {
-        cwd: process.cwd(),
+      // Run Next's CLI directly rather than through `npx`, so the timeout kills the build
+      // itself and not just a wrapper that would leave it running after cleanup.
+      const nextCli = path.join(ROOT, "node_modules", "next", "dist", "bin", "next");
+      const build = spawnSync(process.execPath, [nextCli, "build"], {
+        cwd: PROBE_ROOT,
+        killSignal: "SIGKILL",
         encoding: "utf8",
         timeout: 240_000,
         env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
@@ -68,6 +89,6 @@ test.describe("server-only guard", () => {
     } finally {
       removeProbe();
     }
-    expect(existsSync(PROBE_DIR)).toBe(false);
+    expect(existsSync(PROBE_ROOT)).toBe(false);
   });
 });

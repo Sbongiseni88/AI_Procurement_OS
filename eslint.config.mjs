@@ -28,6 +28,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Throwaway build copy made by the server-only leak probe test.
+    ".leak-probe/**",
   ]),
 ]);
 

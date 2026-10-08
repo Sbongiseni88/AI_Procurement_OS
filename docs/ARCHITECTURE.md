@@ -184,9 +184,12 @@ migrations, scheduled jobs, admin tooling — and every call site must filter by
   credential into every page of the app.
 - `server.ts` — validates the secret key. Begins with `import "server-only"`, so importing
   it from a Client Component is a **build error**, not a runtime surprise. This is an
-  automated test since E1.2: `tests/e2e/server-only-leak.spec.ts` adds a `"use client"`
-  page that imports `admin.ts`, runs `next build`, asserts the build fails with the
-  `server-only` import trace, and removes the probe in `finally`.
+  automated test since E1.2: `tests/e2e/server-only-leak.spec.ts` copies the app into a
+  git-ignored `.leak-probe/` folder, adds a `"use client"` page there that imports
+  `admin.ts`, runs `next build`, asserts the build fails with the `server-only` import
+  trace, and deletes the copy in `finally`. The copy keeps the probe away from the running
+  dev server and from `.next/types`, whose generated route types would otherwise keep
+  pointing at the deleted page and break `typecheck`.
 
 Both modules validate at import time and throw with a `z.prettifyError` message, so
 misconfiguration fails immediately and legibly rather than surfacing as a confusing 401.
