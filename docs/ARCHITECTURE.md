@@ -1,62 +1,93 @@
-# Architecture — AI Procurement OS, Phase 1: Tender Compliance Checker
+# Architecture — AI Procurement OS
 
-> **Status:** E0 foundation done (Next.js, Supabase clients, `organizations`/`profiles` with
-> RLS). Phase 1 scope and tickets are in `docs/TASKS.md`. Sections marked _pending_ are
-> filled in by the ticket named next to them.
+> **Status:** Phase 1 is the **first production module** of the AI Procurement OS, not a
+> standalone compliance app. It is built on a platform core (tenancy, memberships,
+> permissions, audit, versioned documents, events and jobs, AI gateway) that every later
+> module reuses. This document follows the architecture and roadmap sent to the client on
+> 8 Oct 2026 (`AI_Procurement_OS_Architecture_and_Roadmap.pdf`; the client's approval is
+> pending). Tickets are in `docs/TASKS.md`, whose **Architecture rules** apply to every
+> ticket. Only what exists in the code is marked _built_; everything else is _planned_,
+> with the ticket that builds it.
 
 ---
 
 ## 1. System Context
 
+One web application (Next.js on Vercel) and one database platform (Supabase). Modules sit
+on a shared platform core. There are no separate services to host, which keeps running
+costs low and leaves room to add a queue or a second service later if volume demands it.
+
 ```mermaid
 graph TB
-    subgraph client["Browser"]
-        UI["React 19 Client Components<br/>Tailwind 4 · Lucide"]
+    TEAM["Your team<br/><i>browser or phone</i>"]
+
+    subgraph vercel["Web application · Next.js 16 on Vercel"]
+        GATE["Sign-in and permission check on every request<br/><i>proxy.ts · requireMembership() · can(role, action)</i>"]
+        subgraph modules["Modules"]
+            DNA["Company DNA<br/><i>planned, E2</i>"]
+            TWIN["Tenders and Digital Twin<br/><i>planned, E3</i>"]
+            COMP["Compliance and gap report<br/><i>planned, E4</i>"]
+            FUT["Future modules<br/><i>pricing, suppliers, submissions…</i>"]
+        end
+        subgraph core["Platform core · shared by every module"]
+            TEN["Companies, memberships,<br/>permissions"]
+            DOCS["Documents and versions"]
+            LOG["Audit log and<br/>domain events"]
+            JOBS["Jobs and job runner"]
+            GW["AI gateway<br/><i>src/lib/ai</i>"]
+        end
     end
 
-    subgraph vercel["Vercel — Next.js 16 App Router"]
-        PROXY["proxy.ts<br/><i>session refresh + route guard</i>"]
-        RSC["Server Components<br/><i>read path</i>"]
-        SA["Server Actions<br/><i>write path</i>"]
-        RH["Route Handlers<br/><i>uploads where needed</i>"]
-        SVC["Service / Repository layer<br/><i>Zod-validated DTOs ·<br/>expiry + compliance rules</i>"]
+    subgraph supabase["Supabase"]
+        PG[("Postgres<br/>row-level security")]
+        AUTH["Authentication"]
+        STORE[["Private file storage"]]
     end
 
-    subgraph supabase["Supabase Cloud"]
-        PG[("PostgreSQL 15+<br/>Row Level Security")]
-        AUTH["Supabase Auth"]
-        STORE[["Storage (private)<br/><i>tender PDFs + company documents</i>"]]
+    subgraph providers["AI providers, via the gateway only"]
+        ANTHROPIC["Anthropic Claude"]
+        OTHER["Other providers later,<br/>same interface"]
     end
 
-    AI["AI gateway<br/><i>src/lib/ai — server-only,<br/>Zod-validated, logs ai_runs</i>"]
-    ANTHROPIC["Anthropic API<br/><i>reads tenders and<br/>company documents</i>"]
-
-    UI -->|"navigate / submit"| PROXY
-    PROXY --> RSC
-    PROXY --> SA
-    PROXY --> RH
-    RSC --> SVC
-    SA --> SVC
-    RH --> SVC
-    SVC --> PG
-    SVC --> STORE
-    PROXY <-->|"cookie session"| AUTH
+    TEAM --> GATE
+    GATE <-->|"cookie session"| AUTH
+    GATE --> modules
+    modules --> core
+    core --> PG
+    DOCS --> STORE
     AUTH -.->|"auth.uid() drives RLS"| PG
-    SVC --> AI
-    AI -->|"PDF / image in,<br/>structured JSON out"| ANTHROPIC
-
-    classDef gate fill:#fff5f5,stroke:#c53030,stroke-width:2px
-    class SA gate
+    GW --> ANTHROPIC
+    GW -.-> OTHER
 ```
+
+Inside the app, Server Components are the read path, Server Actions the write path, and
+Route Handlers are used only for uploads, the job runner and AI work where needed.
+
+| Platform core part                  | Status                                                                                                               |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Companies, memberships, permissions | Companies, one-company profiles and three roles **built** (T1.3, E1.4); memberships E1.5.2, permission matrix E1.5.3 |
+| Documents and versions              | Planned, E1.5.4                                                                                                      |
+| Audit log and domain events         | Audit log **built** (E1, ticket E1.5); domain events E1.5.5                                                          |
+| Jobs and job runner                 | Planned, E1.5.5                                                                                                      |
+| AI gateway                          | Planned, E1.5.6                                                                                                      |
 
 **Trust boundary:** every database read and write crosses RLS. `auth.uid()` and the
 caller's `organization_id` are the only tenancy discriminators — the application layer
 never filters by tenant on its own, because a bug there would be a data-leak. RLS is the
 enforcement point; the service layer is convenience on top of it.
 
-**AI boundary:** AI only _reads_ documents and proposes facts (pending review). Expiry and
-compliance statuses are computed by deterministic code from facts a person has confirmed.
-pgvector is not used in Phase 1.
+**How AI work runs** (from E2 on):
+
+1. A person uploads a tender or document. The file is hashed and stored unchanged.
+2. A job is queued. The job runner calls the AI gateway, which reads the file and returns
+   structured facts.
+3. Facts are saved as _pending review_, each with page, quote and confidence.
+4. A person confirms or corrects them. Only confirmed facts feed compliance.
+
+**What AI is not allowed to do:** decide a compliance status (rules in code do that, from
+confirmed facts); guess a missing value (it returns "not found"); claim a stamp or document
+is genuine; apply a rule the tender does not state; approve anything. Every material
+decision is a person's, and is logged. pgvector is not used in Phase 1.
 
 ---
 
@@ -102,7 +133,9 @@ pgvector is not used in Phase 1.
 └── public/               # Static assets
 ```
 
-Planned in Phase 1: `src/lib/ai/` (AI gateway, E2.3).
+Planned in E1.5: `src/lib/auth/permissions.ts` (permission matrix, E1.5.3),
+`src/lib/documents/` (documents and versions, E1.5.4), `src/lib/jobs/` (domain events,
+jobs and the job runner, E1.5.5), `src/lib/ai/` (AI gateway, E1.5.6).
 
 ---
 
@@ -149,9 +182,9 @@ without edge-runtime restrictions.
 
 | Use case                                                     | Model                         | Ticket | Rationale                                                                                                                                        |
 | ------------------------------------------------------------ | ----------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Company document reading (type, dates, certification stamps) | **Claude Opus 5.5**           | E2.4   | Reads scanned PDFs and photos natively, including rubber-stamp dates. A misread date flips a document between valid and expired.                 |
-| Tender reading (key facts, returnables, validity rules)      | **Claude Opus 5.5**           | E3.3   | Accuracy-critical: a misread closing date or returnable list costs a bid. Native PDF input avoids a separate OCR service.                        |
-| Compliance matching and conflict checks                      | **None — deterministic code** | E4.1–2 | Predictable, testable, free to run, and explainable to the client. AI suggests requirement-to-category mappings only when a lookup has no match. |
+| Company document reading (type, dates, certification stamps) | **Claude Opus 5.5**           | E2.3   | Reads scanned PDFs and photos natively, including rubber-stamp dates. A misread date flips a document between valid and expired.                 |
+| Tender reading (key facts, returnables, stated rules)        | **Claude Opus 5.5**           | E3.3   | Accuracy-critical: a misread closing date or returnable list costs a bid. Native PDF input avoids a separate OCR service.                        |
+| Compliance matching and conflict checks                      | **None — deterministic code** | E4.2–3 | Predictable, testable, free to run, and explainable to the client. AI suggests requirement-to-category mappings only when a lookup has no match. |
 
 Model facts checked against the `claude-api` skill on 2026-10-08: `claude-opus-5-5`, $4 / $20
 per million input / output tokens (cache reads $0.20), 1M-token context, native PDF input
@@ -162,8 +195,8 @@ a 400, so get JSON back through structured outputs (`output_config.format`) and 
 with Zod anyway; no assistant prefill; check `stop_reason` for `refusal` before reading the
 content.
 
-Rules: every call goes through the AI gateway (`src/lib/ai/`, E2.3) and is logged in
-`ai_runs`. Responses are parsed with Zod; nothing unvalidated reaches the database. AI output
+Rules: every call goes through the provider-neutral AI gateway (`src/lib/ai/`, E1.5.6) and
+is logged in `ai_runs`; no other file imports a provider SDK. Responses are parsed with Zod; nothing unvalidated reaches the database. AI output
 is saved as _pending review_ and never constitutes an approval. Cost: roughly R5–R20 per
 30-page tender at current Opus 5.5 rates ($4 / $20 per million input / output tokens).
 
@@ -248,8 +281,8 @@ AI-generated look; the warm grey canvas is a deliberate step away from it.
 - Tokens: `@theme` in `src/app/globals.css` (Tailwind 4 generates `bg-*`, `text-*`,
   `border-*` utilities from them, e.g. `bg-status-expired-bg`).
 - `StatusPill` (`src/components/ui/status-pill.tsx`): `<StatusPill status="expired" />`.
-  The status list and labels live in `src/lib/compliance/statuses.ts`, so E2.5's expiry
-  engine and E4.1's matching engine return the same values the pill renders.
+  The status list and labels live in `src/lib/compliance/statuses.ts`, so E2.4's validity
+  engine and E4.2's rule engine return the same values the pill renders.
 - App shell (E1.7, `src/components/shell/`): `(app)/layout.tsx` calls `requireMembership()`
   once for every workspace page, then renders `AppShell`. Sidebar from 1024 px; below that
   a header menu button opens the same `SidebarNav` as a drawer. The drawer and the account
@@ -351,6 +384,87 @@ Email + password through Supabase Auth, as Server Actions in `src/lib/auth/actio
   answers the same for new and existing addresses, so it cannot be used to find accounts.
 
 ## 8. Data Model
+
+### Phase 1 tables
+
+Tables that exist or will exist by the end of Phase 1. Every table except `profiles` (the
+person) links to `organizations` (the tenant) and carries the standard RLS policy.
+
+| Table                            | Holds                                                                                                                                                                                      | Status                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `organizations`                  | The tenant: company name, registration, VAT and CSD numbers.                                                                                                                               | **Built** (T1.3)            |
+| `profiles`                       | The person: name and login identity. Today it also binds the person to one company and one role; E1.5.2 moves both to `memberships`.                                                       | **Built** (T1.3)            |
+| `memberships`                    | Person ↔ company with a role and status. Replaces the one-company-per-person link.                                                                                                         | Planned, E1.5.2             |
+| `audit_events`                   | Who did what, when, to which record. Append-only.                                                                                                                                          | **Built** (E1, ticket E1.5) |
+| `domain_events`                  | Business events (document uploaded, tender read, requirement confirmed) that jobs and future agents react to.                                                                              | Planned, E1.5.5             |
+| `jobs`                           | Background work: type, status, attempts, result, error, linked record.                                                                                                                     | Planned, E1.5.5             |
+| `ai_runs`                        | Every AI call: provider, model, task, tokens, cost, time, outcome.                                                                                                                         | Planned, E1.5.6             |
+| `documents`, `document_versions` | Any file in the system (company or tender) with immutable versions, SHA-256 hash, storage location, uploader.                                                                              | Planned, E1.5.4             |
+| `extracted_facts`                | Any fact read from any document: field, value, page, quote, confidence, which AI run or person, review status. Shared by Company DNA and the Digital Twin.                                 | Planned, E2.1               |
+| `evidence_items`                 | Company DNA: category (CSD, tax, B-BBEE, CIPC, CIDB, municipal…), the confirmed document version, issue and expiry dates, certification date.                                              | Planned, E2.1               |
+| `tenders`                        | Digital Twin core: kind (tender, RFQ, RFP, quotation), reference, issuer, closing and briefing dates, scoring system, stage. Optional link to a future opportunity.                        | Planned, E3.1               |
+| `tender_documents`               | Links a tender to its documents and their role (main document, addendum, annexure, returnable form).                                                                                       | Planned, E3.1               |
+| `tender_requirements`            | Each returnable or condition: wording, mandatory flag, document category, machine-readable rule stated by the tender (e.g. "certified copy no older than 90 days"), source page and quote. | Planned, E3.1               |
+| `requirement_decisions`          | A person's review of each requirement's result: confirmed, overridden or not applicable, with the reason and the person. Append-only.                                                      | Planned, E4.1               |
+
+Compliance results are computed on read in Phase 1, so there is no results table.
+
+```mermaid
+erDiagram
+    ORGANIZATIONS ||--o{ MEMBERSHIPS : "has members"
+    PROFILES ||--o{ MEMBERSHIPS : "belongs to"
+    ORGANIZATIONS ||--o{ AUDIT_EVENTS : "who did what"
+    ORGANIZATIONS ||--o{ DOMAIN_EVENTS : "what happened"
+    ORGANIZATIONS ||--o{ JOBS : "background work"
+    JOBS ||--o{ AI_RUNS : "runs"
+    ORGANIZATIONS ||--o{ DOCUMENTS : "owns"
+    DOCUMENTS ||--|{ DOCUMENT_VERSIONS : "has immutable"
+    DOCUMENT_VERSIONS ||--o{ EXTRACTED_FACTS : "is the source of"
+    AI_RUNS ||--o{ EXTRACTED_FACTS : "produces"
+    EXTRACTED_FACTS }o--o| EVIDENCE_ITEMS : "confirmed into"
+    DOCUMENT_VERSIONS ||--o{ EVIDENCE_ITEMS : "confirmed version"
+    ORGANIZATIONS ||--o{ TENDERS : "bids on"
+    TENDERS ||--o{ TENDER_DOCUMENTS : "has"
+    DOCUMENTS ||--o{ TENDER_DOCUMENTS : "main, addenda"
+    TENDERS ||--o{ TENDER_REQUIREMENTS : "has"
+    TENDER_REQUIREMENTS ||--o{ REQUIREMENT_DECISIONS : "reviewed in"
+```
+
+Built today: `organizations`, `profiles`, `audit_events` (detailed diagram below). Every
+other entity in this diagram is planned, in the ticket named in the table above.
+
+### Table conventions
+
+Every table follows these, now and in future modules (Architecture rules in `docs/TASKS.md`):
+
+1. **Required company reference.** `organization_id uuid not null` referencing
+   `organizations` (`on delete cascade`), indexed, with the standard RLS policy
+   `organization_id = (select public.current_organization_id())`. Child tables
+   (`document_versions`, `tender_documents`, …) carry it too, so the same policy applies
+   without joins; a composite foreign key keeps a child in its parent's company. RLS is
+   enabled on every table; default grants are revoked from `anon` and `authenticated` and
+   re-granted precisely. The one exception to the standard read policy is `memberships`,
+   where a person can also read their own rows in other companies.
+2. **Identity and timestamps.** `id uuid` primary key (`gen_random_uuid()`; append-only logs
+   may use a `bigint` identity), `created_at`, and the person who created the row. Tables
+   whose rows change also get `updated_at`, maintained by the `set_updated_at` trigger;
+   append-only and immutable tables (`audit_events`, `document_versions`, …) do not. "Who" columns
+   (`created_by`, `actor_id`, `uploaded_by`) are plain `uuid` with no foreign key, so a
+   person's deletion neither rewrites nor is blocked by history (decision #25).
+3. **Archive, don't delete.** Business records get `archived_at`; evidence history is never
+   removed. User roles hold no `DELETE` privilege on business tables.
+4. **Files only through `documents` and `document_versions`.** Originals are never
+   overwritten; every version keeps its SHA-256 hash.
+5. **AI output only through `extracted_facts`**, with source and review status. Only
+   confirmed facts feed rules.
+6. **Every material change writes an audit entry and a domain event.**
+7. **Background and AI work only through `jobs` and the AI gateway.**
+8. **Writes that must not be forged** (audit entries, file hashes, AI run logs) are made by
+   the service role through one server helper, never by users through the API.
+9. **Rules come from the tender.** No default certification period or document-age limit
+   anywhere.
+
+### Built today
 
 Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 
@@ -476,7 +590,7 @@ the caller and can never attach anyone to an existing company. Both inserts happ
 function call, so a failure leaves neither behind. The first member is `executive_approver`
 (the company's owner); later members arrive by invitation, which is not in Phase 1.
 
-### Audit log (E1.5)
+### Audit log (E1, ticket E1.5)
 
 `audit_events` records who did what, to which record, in which company. It is append-only
 at three layers:
@@ -524,52 +638,116 @@ permissive about those, so a typo there fails at runtime, not compile time.
 
 ### Not yet built
 
-Planned tables, each added with RLS and `verify:rls` coverage in its ticket:
-`company_documents`, `ai_runs` and validity settings on
-`organizations` (E2.1) · `tenders`, `tender_documents`, `tender_requirements` (E3.1).
-Compliance results are computed on read in Phase 1, so there is no results table.
-
-The three roles (`bid_manager`, `pricing_specialist`, `executive_approver`) are kept for
-Phase 1; the booklet's larger role set is a later-phase decision.
+Every planned table in "Phase 1 tables" above is added with RLS and `verify:rls` coverage
+in its own ticket. The three roles (`bid_manager`, `pricing_specialist`,
+`executive_approver`) stay for Phase 1; E1.5.3 adds a read-only `viewer` and the permission
+matrix that later booklet roles are added to.
 
 ## 9. Pipelines
 
 > _Pending._ Mermaid diagrams are added by the tickets that build each pipeline.
 
-| Pipeline                                                                       | Built in  |
-| ------------------------------------------------------------------------------ | --------- |
-| Company document: upload → hash → store → AI read → human review → status      | E2.2–E2.6 |
-| Tender: upload → store → AI read → requirement mapping → human review          | E3.2–E3.5 |
-| Compliance: requirements × confirmed documents → statuses + conflicts → report | E4.1–E4.4 |
+| Pipeline                                                                                     | Built in      |
+| -------------------------------------------------------------------------------------------- | ------------- |
+| Platform: domain event → job → job runner → AI gateway → `ai_runs`                           | E1.5.5–E1.5.6 |
+| Company document: upload → hash → store → AI read → human review → validity                  | E2.2–E2.6     |
+| Tender: upload → store → AI read → requirement mapping → human review                        | E3.2–E3.5     |
+| Compliance: requirements × stated rules × confirmed evidence → statuses + conflicts → report | E4.2–E4.5     |
 
 ---
 
-## 10. Decision Log
+## 10. Full Platform Entity Map
 
-| #   | Decision                                                               | Rationale                                                                                                                                               |
-| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Next.js app at repo root, not a monorepo                               | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                |
-| 2   | PDF extraction via Next.js Route Handlers, not a Python service        | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.  |
-| 3   | Anthropic over OpenAI                                                  | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                 |
-| 4   | System font stack, not Geist                                           | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.     |
-| 5   | RLS as the tenancy enforcement point                                   | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                            |
-| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)        | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                            |
-| 7   | Three separate Supabase clients rather than one configurable factory   | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site. |
-| 8   | Env validated with Zod at import time, split by trust boundary         | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                |
-| 9   | `Database` type is a committed placeholder until T1.3                  | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.        |
-| 10  | `profiles.organization_id` NOT NULL                                    | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                         |
-| 11  | INSERT/DELETE denied to all user roles on both tables                  | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                      |
-| 12  | Anti-escalation duplicated across column GRANTs and a trigger          | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                             |
-| 13  | Phase 1 narrowed to a tender compliance checker                        | Client's booklet has 45 builds; the quote covers five milestones ending 13 Nov 2026. Later phases are listed in `docs/TASKS.md`.                        |
-| 14  | Old static prototype deleted; UI designed fresh                        | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                          |
-| 15  | Client's earlier Python/FastAPI builds not used                        | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.         |
-| 16  | Compliance matching is deterministic code, not AI                      | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                            |
-| 17  | Claude Opus 5.5 through a single AI gateway                            | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                   |
-| 18  | Third-party Claude skills vendored into `.claude/skills/`              | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                 |
-| 19  | E2E suite runs against `next build && next start`, not `next dev`      | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                               |
-| 20  | Tests create users with the admin API (`createUser`, `generateLink`)   | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.           |
-| 21  | Password reset only from a fresh email-link session                    | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                         |
-| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public` | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.              |
-| 23  | Workspace creator becomes `executive_approver`                         | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                        |
-| 24  | Audit events written by the service role through one helper            | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                        |
-| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade  | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                        |
+Designed now so the Phase 1 tables fit the whole system. **None of these tables exist.**
+Each group is created when its module is built (Architecture rule 11), follows the table
+conventions in §8, and reuses the platform core instead of adding its own.
+
+| Domain                         | Main entities                                                                    | Reuses from Phase 1                                                        |
+| ------------------------------ | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Opportunities and verification | opportunities, opportunity sources, verification cases, findings                 | tenders link to an opportunity; documents; facts; jobs                     |
+| Bid / review / no-bid          | bid decisions, factor scores, rationale                                          | tenders, requirements, compliance results, approvals pattern               |
+| BOQ and pricing                | BOQs, BOQ versions, BOQ items, cost lines, pricing scenarios, price approvals    | documents and versions (source BOQ never altered), facts, jobs, audit      |
+| Suppliers and RFQs             | suppliers, supplier contacts, RFQs, RFQ lines, quotes, quote lines               | organizations pattern, evidence items for supplier documents, AI gateway   |
+| Submissions                    | submissions, submission items, locks, receipts, submission records               | documents and versions (hashes for the lock), requirements, audit          |
+| Tasks and approvals            | tasks (human and AI owner, deadline), approvals                                  | memberships and permissions, domain events, audit                          |
+| AI workforce and Company Brain | agents, agent assignments, knowledge chunks (vector search), knowledge conflicts | jobs, AI runs, AI gateway, facts and their sources                         |
+| Projects and contracts         | contracts, projects, milestones, budgets, variations                             | tenders (award to project), documents, facts                               |
+| Procurement and logistics      | purchase orders, PO lines, deliveries, proof of delivery                         | suppliers, documents, jobs, audit                                          |
+| Finance                        | invoices, receipts, expenses, payments                                           | projects, documents, approvals, audit                                      |
+| SaaS and B2B network           | plans, subscriptions, usage, company connections                                 | organizations and memberships, permissions, AI run costs for usage billing |
+
+---
+
+## 11. Roadmap Stages
+
+Build numbers refer to the client's Master Developer Booklet. Only Phase 1 is quoted; each
+later stage is scoped and quoted separately.
+
+| Stage            | Scope                                                                                                                                                                                                                                                                                                                                                        | Booklet builds                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| **Now: Phase 1** | Platform core (tenancy, memberships, permissions, audit, documents and versions, events and jobs, AI gateway) · Company DNA with AI reading of dates and stamps · tender/RFQ upload and AI reading into the Digital Twin · requirements with tender-stated rules · evidence matching · compliance and gap report · human review · dashboard and tender board | 7.01, core of 7.02, 7.03, 7.04         |
+| V1               | Completes the golden path: bid / review / no-bid · BOQ extraction and pricing scenarios · submission pack builder · human approval and document lock · submission record · tasks and notifications · executive dashboard · basic AI orchestration of the steps                                                                                               | 7.05, 7.07–7.13, 7.25–7.27             |
+| V1.5 / V2        | Supplier intelligence · automated supplier RFQs · quote comparison · bid register and follow-ups · Company Brain · human completion centre · verification and trust engine · high-volume tender processing · multi-company SaaS (sign-up, plans, billing)                                                                                                    | 7.06, 7.14, 7.29, 7.37–7.40, 7.42–7.45 |
+| Later            | Opportunity discovery from portals · award-to-project · project management · procurement and purchase orders · logistics and proof of delivery · invoicing, payments and profitability · contract intelligence · email/Teams/WhatsApp · AI workforce at scale · B2B procurement network                                                                      | 7.15–7.21, 7.28, 7.30–7.36, 7.41       |
+
+Phase 1 milestones (M1 done 8 Oct; M1.5 platform foundation 12–16 Oct; M2–M5 to 18 Nov)
+and their tickets are in `docs/TASKS.md`.
+
+---
+
+## 12. Reuse Map
+
+What Phase 1 builds and which later modules reuse it.
+
+| Built in Phase 1                       | Reused by                                                                                    |
+| -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Companies, memberships, permissions    | Every module; SaaS onboarding and the B2B network                                            |
+| Audit log                              | Every module; approvals, locks and submission records                                        |
+| Documents, versions and hashing        | BOQs, submission packs and locks, supplier documents, contracts, invoices, proof of delivery |
+| Extracted facts with sources           | Company Brain answers with sources, verification engine, BOQ and contract reading            |
+| Events, jobs and job runner            | AI agents, notifications, follow-ups, high-volume processing                                 |
+| AI gateway and AI run log              | Every AI feature; cost tracking and usage billing for SaaS                                   |
+| Tender Digital Twin                    | Bid decision, BOQ, pricing, submissions, award-to-project                                    |
+| Rule engine (requirement rules)        | Submission validation, supplier compliance, verification checks                              |
+| App shell, design system, status pills | Every screen                                                                                 |
+
+---
+
+## 13. Decision Log
+
+| #   | Decision                                                               | Rationale                                                                                                                                                                                                              |
+| --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Next.js app at repo root, not a monorepo                               | Single deployable; monorepo tooling would violate CLAUDE.md §1.1 (do not over-engineer).                                                                                                                               |
+| 2   | PDF extraction via Next.js Route Handlers, not a Python service        | Anthropic's native PDF input removes the need for a separate OCR stack and a second deploy target. Revisit only if table extraction proves inadequate.                                                                 |
+| 3   | Anthropic over OpenAI                                                  | Native PDF and image input plus structured output covers document and tender reading in one dependency.                                                                                                                |
+| 4   | System font stack, not Geist                                           | No build-time font fetch. Reconfirmed in E1.6: a working tool should look native (Segoe UI on the client's machines) and load with no layout shift.                                                                    |
+| 5   | RLS as the tenancy enforcement point                                   | Application-layer tenant filtering is one bug away from cross-tenant disclosure of competitors' bid pricing.                                                                                                           |
+| 6   | ~~One git branch per task~~ Work directly on `main` (from E1.1)        | Solo developer, one machine. Every push deploys, so nothing is pushed until all checks pass.                                                                                                                           |
+| 7   | Three separate Supabase clients rather than one configurable factory   | The key in use determines whether RLS applies. Making that a parameter would make the most dangerous decision in the system invisible at the call site.                                                                |
+| 8   | Env validated with Zod at import time, split by trust boundary         | Fails fast and legibly. The split is what lets `server-only` guarantee the secret key cannot be bundled for the browser.                                                                                               |
+| 9   | `Database` type is a committed placeholder until T1.3                  | Keeps the clients generically typed instead of falling back to the library's internal `any`. Replaced by `supabase gen types` once tables exist.                                                                       |
+| 10  | `profiles.organization_id` NOT NULL                                    | A nullable tenant key produces NULL comparisons that read as "no filter" rather than "no rows".                                                                                                                        |
+| 11  | INSERT/DELETE denied to all user roles on both tables                  | Profile insertion is the obvious route into a rival's organization. Provisioning stays privileged.                                                                                                                     |
+| 12  | Anti-escalation duplicated across column GRANTs and a trigger          | Layer 1 is silently undone by any future `grant all`. The blast radius — approving your own bid — justifies the redundancy.                                                                                            |
+| 13  | Phase 1 scoped to tender compliance                                    | Client's booklet has 45 builds; the quote covered five milestones ending 13 Nov 2026 (now 18 Nov, with Milestone 1.5; see #26). Later stages are in §11.                                                               |
+| 14  | Old static prototype deleted; UI designed fresh                        | Client's reference is a minimal work-management tool. Porting the prototype would carry its look and its out-of-scope screens.                                                                                         |
+| 15  | Client's earlier Python/FastAPI builds not used                        | About 350 lines of real logic, main build crashes on import, no auth or migrations. Ideas (statuses, never-infer rules) carried over; code not.                                                                        |
+| 16  | Compliance matching is deterministic code, not AI                      | Predictable, unit-testable, free to run and explainable. AI is limited to reading documents.                                                                                                                           |
+| 17  | Claude Opus 5.5 through a single AI gateway                            | One place for model choice, Zod validation, cost logging and provider changes (booklet: "keep model providers behind an AI gateway").                                                                                  |
+| 18  | Third-party Claude skills vendored into `.claude/skills/`              | Read before adding; pinned versions; web-design-guidelines saved locally instead of fetched at runtime.                                                                                                                |
+| 19  | E2E suite runs against `next build && next start`, not `next dev`      | Tests what Vercel serves. `next dev` rewrites Cache-Control, which would hide the auth no-store headers the tests assert.                                                                                              |
+| 20  | Tests create users with the admin API (`createUser`, `generateLink`)   | Supabase's built-in mailer sends a few emails an hour, only to team addresses. `generateLink` returns the real email link without sending it.                                                                          |
+| 21  | Password reset only from a fresh email-link session                    | Without the old password, a signed-in session alone must not be able to change it (account takeover from an unlocked computer).                                                                                        |
+| 22  | Onboarding: DEFINER function in `private`, INVOKER wrapper in `public` | Supabase checklist: a DEFINER function in an exposed schema is a public endpoint. No id parameters, so it cannot join an existing company.                                                                             |
+| 23  | Workspace creator becomes `executive_approver`                         | They own the company account. Later members (invitations, later phase) default to `bid_manager`.                                                                                                                       |
+| 24  | Audit events written by the service role through one helper            | A user INSERT grant would let anyone forge entries in their own company's log. The helper derives organization and actor itself.                                                                                       |
+| 25  | Audit rows: no FK on `actor_id`; deleted only by organization cascade  | `ON DELETE SET NULL` would be an update to history; a user's deletion must not rewrite or be blocked by the log.                                                                                                       |
+| 26  | Phase 1 is the first production module on a shared platform core       | Client requirement of 8 Oct 2026. Pricing, suppliers, submissions and agents must plug into one database, login, document store, audit trail, AI gateway and task engine instead of being rebuilt. Adds Milestone 1.5. |
+| 27  | Tenancy through `memberships`, not a company stored on the profile     | A consultant or group director can belong to several companies; adding a company becomes data, not code. Access follows the active membership (E1.5.2).                                                                |
+| 28  | One permission matrix in code; RLS keeps tenancy and sensitive writes  | Booklet roles are added to one table, not to every screen. The database still refuses cross-company access and forged writes if the app has a bug.                                                                     |
+| 29  | Files only as `documents` with immutable, SHA-256-hashed versions      | Evidence must be provable later (submission locks, disputes): the original is never overwritten or deleted, and the hash shows it is unchanged.                                                                        |
+| 30  | Background work in a Postgres `jobs` table with a job runner route     | No queue service to host or pay for. Claimed with `FOR UPDATE SKIP LOCKED`; future AI agents are new job types. Revisit if volume outgrows it.                                                                         |
+| 31  | Provider-neutral AI gateway; Claude is the first adapter               | Another provider is a new adapter, not a rewrite. One place logs model, tokens, cost and time in `ai_runs` (supersedes the single-provider wording of #17).                                                            |
+| 32  | Rules only from the tender; no default certification period            | Correction to the quote: age limits apply only when a tender states them, stored with page and quote. A silent tender applies no limit.                                                                                |
+| 33  | Archive, don't delete                                                  | Business records and evidence history are archived (`archived_at`), never hard-deleted, so past bids stay explainable.                                                                                                 |
+| 34  | Future-module tables designed now, created with their module           | The entity map (§10) keeps Phase 1 compatible with the full platform without carrying empty tables, migrations and RLS for features not yet built.                                                                     |

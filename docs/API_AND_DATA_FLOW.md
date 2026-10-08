@@ -1,7 +1,8 @@
 # API & Data Flow — AI Procurement OS, Phase 1
 
-> **Status:** Auth (E1.3), onboarding (E1.4) and the audit helper (E1.5) are built. Entries
-> are added by the ticket that builds them (uploads E2.2, AI reading E2.4 and E3.3).
+> **Status:** Auth (E1.3), onboarding (E1.4) and the audit helper (E1 ticket E1.5) are built. Entries
+> are added by the ticket that builds them (platform core E1.5.2–E1.5.6, uploads E2.2, AI
+> reading E2.3 and E3.3).
 
 ## Conventions
 
@@ -54,16 +55,16 @@ text is never shown.
 
 ## AI Payload Contracts
 
-All calls go through the AI gateway (`src/lib/ai/`, E2.3), which validates output with Zod
-and writes an `ai_runs` row (model, tokens, cost, latency, outcome).
+All calls go through the provider-neutral AI gateway (`src/lib/ai/`, E1.5.6), which validates
+output with Zod and writes an `ai_runs` row (model, tokens, cost, latency, outcome).
 
-| Pipeline                 | Model             | Input                     | Output schema (defined in ticket)                                                                                                                                         | Ticket |
-| ------------------------ | ----------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| Company document reading | `claude-opus-5-5` | One PDF or image          | `CompanyDocumentReadingSchema`: type, issuer, entity name, registration no., address, issue/expiry dates, certification stamps (date, office, page), confidence per field | E2.4   |
-| Tender reading           | `claude-opus-5-5` | Tender or RFQ PDF         | `TenderReadingSchema`: reference, issuer, closing and briefing dates, scoring system, returnable documents with mandatory flag, validity rules, page + quote per item     | E3.3   |
-| Requirement mapping hint | `claude-opus-5-5` | One unmatched requirement | `CategorySuggestionSchema`: suggested document category + confidence (used only when the lookup table has no match)                                                       | E3.4   |
+| Pipeline                 | Model             | Input                     | Output schema (defined in ticket)                                                                                                                                              | Ticket |
+| ------------------------ | ----------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| Company document reading | `claude-opus-5-5` | One PDF or image          | `CompanyDocumentReadingSchema`: type, issuer, entity name, registration no., address, issue/expiry dates, certification stamps (date, office, page), confidence per field      | E2.3   |
+| Tender reading           | `claude-opus-5-5` | Tender or RFQ PDF         | `TenderReadingSchema`: reference, issuer, closing and briefing dates, scoring system, returnable documents with mandatory flag, rules the tender states, page + quote per item | E3.3   |
+| Requirement mapping hint | `claude-opus-5-5` | One unmatched requirement | `CategorySuggestionSchema`: suggested document category + confidence (used only when the lookup table has no match)                                                            | E3.4   |
 
-Not AI: expiry status (E2.5), compliance matching (E4.1) and cross-document conflict checks
-(E4.2) are deterministic functions with unit tests.
+Not AI: document validity (E2.4), the requirement rule engine (E4.2) and cross-document
+conflict checks (E4.3) are deterministic functions with unit tests.
 
 Every schema returns an explicit "not found" rather than a guessed value.

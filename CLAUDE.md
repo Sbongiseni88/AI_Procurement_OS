@@ -1,7 +1,7 @@
-# Project: AI Procurement OS — Phase 1: Tender Compliance Checker
+# Project: AI Procurement OS — Phase 1: Tender Compliance (first production module)
 
 You are the lead engineer building **AI Procurement OS** for a South African client who submits government tenders and RFQs.
-Phase 1 is a **tender compliance checker**: upload a tender and the company's documents, and the system shows what the tender requires, which documents meet it, and which are expired, expiring, certified too long ago, missing or in conflict. The client uses it for his own company first; selling it to other companies is a later phase.
+Phase 1 is the **first production module** of the AI Procurement OS, not a standalone app: tender compliance. Upload a tender and the company's documents, and the system shows what the tender requires, which documents meet the rules the tender states, and which are expired, expiring, certified too long ago (by the tender's own rule), missing or in conflict. It is built on a shared platform core (companies and memberships, permissions, audit, versioned documents, events and jobs, AI gateway) that every later module reuses. The client uses it for his own company first; selling it to other companies is a later phase.
 
 The client's long-term vision is in the Master Developer Booklet (45 builds). Treat it as direction, not scope. Phase 1 scope is defined in `docs/TASKS.md`.
 
@@ -33,7 +33,7 @@ The client's long-term vision is in the Master Developer Booklet (45 builds). Tr
 
 - **App:** Next.js 16 (App Router) + React 19 + TypeScript strict, Tailwind CSS 4, Lucide icons. Server Components for reads, Server Actions for writes, Route Handlers only for uploads/AI where needed. Route protection lives in `proxy.ts` (Next 16 replaced `middleware.ts`).
 - **Database, auth, files:** Supabase (Postgres with Row Level Security on every table, Supabase Auth, private Storage buckets). Tenancy is enforced by RLS via `organization_id`.
-- **AI:** Anthropic API through **one server-only AI gateway module** (`src/lib/ai/`). Default model `claude-opus-5-5` for reading tenders and company documents (native PDF and image input, structured output validated with Zod). Every call is logged (model, tokens, cost, latency). The API key belongs to the client's Anthropic account.
+- **AI:** Anthropic API through **one server-only, provider-neutral AI gateway module** (`src/lib/ai/`); no other file imports a provider SDK. Default model `claude-opus-5-5` for reading tenders and company documents (native PDF and image input, structured output validated with Zod). Every call is logged (model, tokens, cost, latency). The API key belongs to the client's Anthropic account.
 - **Testing:** Playwright for user journeys, Node's built-in `node --test` for pure logic, `npm run verify:rls` for tenant isolation.
 - **Hosting:** Vercel + Supabase Cloud. The GitHub repo is linked to Vercel, so every push to `main` deploys. Runs on the developer's accounts until production moves to the client's accounts in E5.
 
@@ -41,11 +41,18 @@ The client's long-term vision is in the Master Developer Booklet (45 builds). Tr
 
 ## 3. Scope
 
-**Phase 1 (in scope, see `docs/TASKS.md`):** logins and one company workspace with roles · audit log · company document vault with AI reading of type, dates and certification stamps · expiry, expiring-soon and stale-certification checks · tender PDF reading with page references · requirement-to-document matching and cross-document conflict checks · gap report · tender board and dashboard.
+Phase 1 is the first production module of one system, not a separate compliance app. The architecture sent to the client on 8 Oct 2026 (his approval is pending; see "Waiting on the client" in `docs/TASKS.md`) is in `docs/ARCHITECTURE.md`: system diagram, Phase 1 tables, table conventions, full platform entity map, roadmap, reuse map.
 
-**Later phases (do NOT build now):** bid / no-bid scoring · BOQ and pricing scenarios · MBD form filling · submission pack builder, approval gate and lock · subscription product for other companies · suppliers and RFQs · projects, logistics, finance · email/WhatsApp/e-tender portal integrations · authenticity verification of stamps and documents.
+**Phase 1 (in scope, see `docs/TASKS.md`):**
 
-If a request falls outside Phase 1, say so and suggest adding it to "Later phases" rather than building it.
+- _Platform core, reused by every later module:_ companies, memberships and a permission matrix · append-only audit log · versioned, hashed documents · extracted facts with sources · domain events, jobs and a job runner · provider-neutral AI gateway with a run log · extensible Tender Digital Twin · requirement rule engine.
+- _Functionality:_ company onboarding → Company DNA (document upload, AI reading of type, dates and certification stamps, validity) → tender/RFQ upload and AI reading with page references → requirements with the rules the tender states → evidence matching and cross-document conflict checks → compliance and gap report → human review · tender board and dashboard.
+
+**Architecture rules:** the 11 rules in `docs/TASKS.md` ("Architecture rules") apply to every ticket: every business record belongs to a company; tenancy through memberships; permissions from one matrix; files only through documents and versions; AI output only through extracted facts; AI only through the gateway; background work only through jobs; audit entry and domain event for every material change; rules only from the tender; archive, don't delete; design for the full platform, build for Phase 1. A ticket that cannot follow one stops and asks.
+
+**Later stages (do NOT build now; see the roadmap in `docs/ARCHITECTURE.md` §11):** bid / no-bid scoring · BOQ and pricing scenarios · MBD form filling · submission pack builder, approval gate and lock · subscription product for other companies · suppliers and RFQs · projects, logistics, finance · email/WhatsApp/e-tender portal integrations · authenticity verification of stamps and documents. Their tables are designed in the entity map but created only when their module is built.
+
+If a request falls outside Phase 1, say so and suggest adding it to the roadmap rather than building it.
 
 ---
 
