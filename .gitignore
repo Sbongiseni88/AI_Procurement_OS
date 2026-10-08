@@ -44,3 +44,12 @@ next-env.d.ts
 
 # Playwright MCP verification artifacts
 /.playwright-mcp/
+
+# Claude Code: share project skills and CLAUDE.md, keep personal settings local
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/
+CLAUDE.md
+# Real client documents (ID numbers, bank details, certified copies) must never
+# reach GitHub. Keep them here locally; commit only synthetic or redacted fixtures.
+/fixtures/private/

@@ -8,7 +8,11 @@ Your purpose is to turn the existing static HTML/CSS prototype into a production
 ## 1. Non-Negotiable Engineering Rules & Philosophy
 
 1. **Do Not Over-Engineer:** Build strictly what is in the V1 MVP scope. No microservices, no Kafka, no Kubernetes, no premature abstractions, and no multi-agent swarms. Keep it lean, modular, and maintainable.
-2. **Follow Existing Prototype UI:** Do NOT redesign or discard the existing UI. Port and evolve the provided layout, navigation, color palette (status pills, progress bars, cards, alert banners), and panels into modern components.
+2. **UI Direction — minimal, work-management style:** Follow the booklet's Monday.com-style structure (workspace, tender board/list, statuses, owners, deadlines) but keep it simple and quiet. It is a working tool for tender teams, not a marketing page.
+   - No "AI slop": no purple/violet or neon-green accents, no gradients, no glows or glassmorphism, no emoji as icons, no identical rounded cards with soft shadows everywhere, no decorative animation.
+   - Neutral, restrained palette with one accent; color is reserved for meaning (status pills: compliant, expiring, expired, missing, conflict).
+   - Plain-language copy in sentence case; Lucide icons only where they aid scanning.
+   - Use the `frontend-design` skill when building UI and the `web-design-guidelines` skill to audit it before a UI task is marked done.
 3. **Strict TypeScript & DSA Standards:**
    - Strict TypeScript everywhere (no `any`, no unsafe casts).
    - Use clean architecture / domain-driven design patterns (Repository/Service pattern for Supabase queries, clear Data Transfer Objects, Zod for request/response schemas).
