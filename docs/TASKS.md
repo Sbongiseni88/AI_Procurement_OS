@@ -6,8 +6,8 @@
 ## Working agreement
 
 - **One epic per Claude session.** Start each epic in a fresh session. Begin with that epic's _Session start_ block; finish by writing its _Handoff notes_ so the next session can start cold.
-- **One ticket at a time.** Wait for the go-ahead before each ticket. One branch per ticket, always cut from `main` (`feat/e2.3-slug`, `chore/...`, `fix/...`). Never stack a branch on an unmerged one.
-- **Done means:** `typecheck` + `lint` + `format:check` + `build` pass; new user journeys have a Playwright test; UI tickets pass a `web-design-guidelines` audit; docs updated; ticket marked `[DONE]` with timestamp; merged to `main`.
+- **One ticket at a time.** Wait for the go-ahead before each ticket. Work directly on `main`; no task branches. **Every push to `main` deploys to Vercel**, so push only when every check is green. Never force-push.
+- **Done means:** `typecheck` + `lint` + `format:check` + `build` pass; new user journeys have a Playwright test; UI tickets pass a `web-design-guidelines` audit; docs updated; ticket marked `[DONE]` with timestamp; committed and pushed to `main`.
 - **Keep it small.** Build only what the ticket says. No new library unless the ticket needs it. If a ticket grows past ~1 day, split it and ask.
 - **UI:** minimal, work-management style, no "AI slop" (see CLAUDE.md §1.2). Use the `frontend-design` skill to build, `web-design-guidelines` to audit.
 - **Database:** load `supabase` + `supabase-postgres-best-practices` skills before any migration or RLS change. Applied migrations are never edited; changes go in a new migration.
@@ -37,7 +37,7 @@
 
 - `[DONE]` **T1.1** — Next.js 16 + TypeScript strict, Tailwind 4, ESLint, Prettier, Lucide. _(2026-09-08 10:07 SAST)_
 - `[DONE]` **T1.2** — Supabase browser/server/admin clients, Zod-validated env. _(2026-09-08 15:15 SAST)_
-- `[DONE]` **T1.3** — Migration: `organizations`, `profiles`, `app_role`, RLS, anti-escalation trigger, `verify:rls` script. _(2026-09-08 15:47 SAST)_ Applied to the hosted DB; branch not yet merged (see E1.1).
+- `[DONE]` **T1.3** — Migration: `organizations`, `profiles`, `app_role`, RLS, anti-escalation trigger, `verify:rls` script. _(2026-09-08 15:47 SAST)_ Applied to the hosted DB; branch `feat/t1.3-schema-rls` not yet merged (see E1.1).
 
 ---
 
@@ -47,7 +47,7 @@
 
 **Session start:** read CLAUDE.md, this epic, ARCHITECTURE.md §4 (Next.js 16 constraints), §7 (Supabase clients), §8 (data model). Skills: `supabase`, `frontend-design`, `react-best-practices`.
 
-- `[TODO]` **E1.1** — Housekeeping. Merge `feat/t1.3-schema-rls` to `main` after a quick review. That branch also carries the project skills, `.gitignore` and CLAUDE.md UI rules (`c11c0b0`) and this task board.
+- `[TODO]` **E1.1** — Housekeeping. Commit the pending docs/config changes on `feat/t1.3-schema-rls`, review the branch against `main`, merge it into `main` (last branch merge; from here on we work directly on `main`), push, and delete the branch. It carries the T1.3 migration, `verify:rls`, project skills, `.gitignore`, CLAUDE.md and this task board.
 - `[TODO]` **E1.2** — Playwright harness: `@playwright/test`, `playwright.config.ts`, `tests/e2e/`, `test:e2e` script, one smoke test. Include the `server-only` leak probe (importing `admin.ts` from a Client Component must fail the build).
 - `[TODO]` **E1.3** — Auth: sign up, log in, log out, password reset email. Route protection in `proxy.ts`.
   - Must apply the `no-store` cache headers `@supabase/ssr` passes as `setAll`'s second argument (T1.2 review finding); E2E asserts it.
@@ -58,7 +58,7 @@
 - `[TODO]` **E1.6** — Design pass: write a short design plan (frontend-design), then define the token set in `globals.css` (the old prototype palette is already removed; only a neutral base remains). Status tokens for the Phase 1 set: compliant, expiring, expired, missing, conflict, needs verification, unable to verify. One `StatusPill` component. Update ARCHITECTURE.md §6.
 - `[TODO]` **E1.7** — App shell: sidebar (Dashboard, Tenders, Company documents, Settings), header with company and user menu, responsive to phone width.
 - `[TODO]` **E1.8** — Dashboard and tender board layout with real empty states (no fake numbers): "No tenders yet — upload your first tender" etc. Board columns follow the tender stages planned in E3.
-- `[TODO]` **E1.9** — Deploy: connect the GitHub repo to Vercel (preview on our account until E5), env vars, Supabase auth redirect URLs, smoke test the live URL, send the link. Update ARCHITECTURE.md §5 to current models (Claude Opus 5.5 for reading; matching in E4 is deterministic code, not AI).
+- `[TODO]` **E1.9** — Deploy check: the GitHub repo is already linked to Vercel, so pushes to `main` deploy. Confirm the Vercel env vars are set, add the Vercel URL to Supabase auth Site URL / redirect URLs, smoke test sign-up and log-in on the live URL, then hand the link to the user to send. Update ARCHITECTURE.md §5 to current models (Claude Opus 5.5 for reading; matching in E4 is deterministic code, not AI).
 
 **Cut line:** E1.8 board polish; password reset (E1.3) can slip to E5.
 

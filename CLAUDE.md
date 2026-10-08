@@ -35,7 +35,7 @@ The client's long-term vision is in the Master Developer Booklet (45 builds). Tr
 - **Database, auth, files:** Supabase (Postgres with Row Level Security on every table, Supabase Auth, private Storage buckets). Tenancy is enforced by RLS via `organization_id`.
 - **AI:** Anthropic API through **one server-only AI gateway module** (`src/lib/ai/`). Default model `claude-opus-5-5` for reading tenders and company documents (native PDF and image input, structured output validated with Zod). Every call is logged (model, tokens, cost, latency). The API key belongs to the client's Anthropic account.
 - **Testing:** Playwright for user journeys, Node's built-in `node --test` for pure logic, `npm run verify:rls` for tenant isolation.
-- **Hosting:** Vercel + Supabase Cloud. Preview on the developer's accounts; production moves to the client's accounts in E5.
+- **Hosting:** Vercel + Supabase Cloud. The GitHub repo is linked to Vercel, so every push to `main` deploys. Runs on the developer's accounts until production moves to the client's accounts in E5.
 
 ---
 
@@ -72,10 +72,10 @@ Project skills and their sources are listed in `.claude/skills/README.md`.
 ## 6. Per-Ticket Protocol
 
 1. Wait for the user's go-ahead, then announce: `Starting E1.3: Auth`.
-2. Create a branch from `main` (`feat/e1.3-auth`, `fix/…`, `chore/…`). Never branch from an unmerged branch.
+2. Work directly on `main` (no task branches; this machine is the only one pushing). **Every push to `main` auto-deploys to Vercel**, so nothing is pushed until step 5 is fully green.
 3. Review the relevant files, schemas and skills (`supabase` + `supabase-postgres-best-practices` before any migration; never edit an applied migration).
 4. Write clean, type-safe code, keeping to the ticket.
 5. Verify: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build`, plus tests the ticket needs (`npm run test:e2e` once E1.2 lands, `npm run verify:rls` after schema changes).
 6. Update docs and mark the ticket `[DONE]` in `docs/TASKS.md` with a completion-log row.
-7. Commit only the files the ticket touched (no blind `git add .`), message `feat(scope): E1.3 - description`, push the branch, and confirm with the user before merging to `main`.
+7. Commit only the files the ticket touched (no blind `git add .`), message `feat(scope): E1.3 - description`, then push `main`. Never force-push or rewrite `main` history.
 8. Stop and report. Do not start the next ticket without a new go-ahead.
