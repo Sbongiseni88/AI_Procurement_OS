@@ -170,7 +170,7 @@ assume. Authoritative source: `node_modules/next/dist/docs/01-app/02-guides/upgr
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **`middleware.ts` → `proxy.ts`**      | E1.3 route protection goes in `proxy.ts` with a named `export function proxy(request)`. The `edge` runtime is **not supported** there; `proxy` is always `nodejs` and this is not configurable. Config flags renamed too (`skipMiddlewareUrlNormalize` → `skipProxyUrlNormalize`). |
 | **Async Request APIs (hard removal)** | `cookies()`, `headers()`, `draftMode()`, and `params` / `searchParams` **must be awaited**. Synchronous access no longer merely warns — it is gone. This dictates the shape of the Supabase server client (T1.2).                                                                  |
-| **Generated route types**             | Use `PageProps<'/route'>`, `LayoutProps<'/route'>`, `RouteContext<'/route'>` (produced by `next typegen`). Do not hand-roll page/layout prop types.                                                                                                                                |
+| **Generated route types**             | Use `PageProps<'/route'>`, `LayoutProps<'/route'>`, `RouteContext<'/route'>` (produced by `next typegen`). Do not hand-roll page/layout prop types. `npm run typecheck` runs `next typegen` first, so a fresh clone or CI can typecheck without a build (found in E1.5.7).         |
 | **Turbopack by default**              | Bundler config belongs under `turbopack` in `next.config.ts`, not `webpack`.                                                                                                                                                                                                       |
 | **`next lint` removed**               | Lint via `eslint` directly — `package.json` already does this.                                                                                                                                                                                                                     |
 
@@ -554,54 +554,132 @@ Migrations (in `supabase/migrations/`, applied to the hosted dev project):
 
 ```mermaid
 erDiagram
-    AUTH_USERS ||--|| PROFILES : "id (FK, on delete cascade)"
-    PROFILES ||--o{ MEMBERSHIPS : "user_id (FK, on delete cascade)"
-    ORGANIZATIONS ||--o{ MEMBERSHIPS : "organization_id (FK, on delete cascade)"
-    ORGANIZATIONS |o--o{ PROFILES : "active_organization_id (FK, on delete set null)"
-    ORGANIZATIONS ||--o{ AUDIT_EVENTS : "organization_id (FK, on delete cascade)"
+    AUTH_USERS ||--|| PROFILES : "id (FK, cascade)"
+    PROFILES ||--o{ MEMBERSHIPS : "user_id (FK, cascade)"
+    ORGANIZATIONS ||--o{ MEMBERSHIPS : "organization_id (FK, cascade)"
+    ORGANIZATIONS |o--o{ PROFILES : "active_organization_id (FK, set null)"
+    ORGANIZATIONS ||--o{ AUDIT_EVENTS : "organization_id (FK, cascade)"
+    ORGANIZATIONS ||--o{ DOCUMENTS : "organization_id (FK, cascade)"
+    DOCUMENTS ||--|{ DOCUMENT_VERSIONS : "(document_id, organization_id) (FK, cascade)"
+    DOCUMENTS |o--o| DOCUMENT_VERSIONS : "(current_version_id, id) (FK, same document)"
+    ORGANIZATIONS ||--o{ DOMAIN_EVENTS : "organization_id (FK, cascade)"
+    ORGANIZATIONS ||--o{ JOBS : "organization_id (FK, cascade)"
+    DOMAIN_EVENTS |o--o{ JOBS : "event_id (FK, cascade)"
+    ORGANIZATIONS ||--o{ AI_RUNS : "organization_id (FK, cascade)"
+    JOBS |o..o{ AI_RUNS : "job_id (no FK)"
 
     AUTH_USERS {
         uuid id PK "managed by Supabase Auth"
         text email
     }
-
     ORGANIZATIONS {
-        uuid id PK "gen_random_uuid()"
-        text name "NOT NULL, non-blank"
+        uuid id PK
+        text name "NOT NULL, visible text"
         text registration_number "nullable"
         text vat_number "nullable"
         text csd_supplier_number "nullable"
         timestamptz created_at
-        timestamptz updated_at "trigger-maintained"
+        timestamptz updated_at "trigger"
     }
-
     PROFILES {
-        uuid id PK-FK "= auth.users.id"
+        uuid id PK "= auth.users.id"
         text full_name "nullable"
-        uuid active_organization_id FK "nullable; a preference, never access"
+        uuid active_organization_id FK "a preference, never access"
         timestamptz created_at
-        timestamptz updated_at "trigger-maintained"
+        timestamptz updated_at "trigger"
     }
-
     MEMBERSHIPS {
-        uuid id PK "gen_random_uuid()"
-        uuid organization_id FK "NOT NULL"
-        uuid user_id FK "NOT NULL, = profiles.id"
-        app_role role "NOT NULL, default bid_manager"
-        membership_status status "invited | active | removed"
-        uuid invited_by "nullable, no FK"
+        uuid id PK
+        uuid organization_id FK "UNIQUE with user_id"
+        uuid user_id FK
+        app_role role "executive_approver, bid_manager, pricing_specialist, viewer"
+        membership_status status "invited, active, removed"
+        uuid invited_by "no FK"
         timestamptz created_at
-        timestamptz updated_at "trigger-maintained"
+        timestamptz updated_at "trigger"
     }
-
     AUDIT_EVENTS {
-        bigint id PK "identity"
-        uuid organization_id FK "NOT NULL"
-        uuid actor_id "nullable, no FK (history survives user deletion)"
-        text action "entity.verb, e.g. workspace.created"
-        text entity_type "NOT NULL"
+        bigint id PK "identity, append-only"
+        uuid organization_id FK
+        uuid actor_id "no FK"
+        text action "entity.verb"
+        text entity_type
         uuid entity_id "nullable"
-        jsonb details "object, default {}"
+        jsonb details "object"
+        timestamptz created_at
+    }
+    DOCUMENTS {
+        uuid id PK "UNIQUE with organization_id"
+        uuid organization_id FK
+        document_kind kind "company, tender"
+        text title
+        text category "nullable slug (E2)"
+        uuid current_version_id FK "newest version"
+        uuid created_by "no FK"
+        timestamptz created_at
+        timestamptz updated_at "trigger"
+        timestamptz archived_at "archive, never delete"
+    }
+    DOCUMENT_VERSIONS {
+        uuid id PK "immutable"
+        uuid organization_id "= the document's"
+        uuid document_id FK
+        int version_number "UNIQUE per document"
+        text storage_path "UNIQUE, org/document/version"
+        text sha256 "64 hex"
+        bigint size_bytes
+        text mime_type "sniffed"
+        text original_file_name
+        uuid uploaded_by "no FK"
+        timestamptz uploaded_at
+    }
+    DOMAIN_EVENTS {
+        bigint id PK "identity, append-only"
+        uuid organization_id FK
+        text type "entity.verb"
+        text entity_type
+        uuid entity_id "nullable"
+        jsonb payload "object"
+        uuid actor_id "no FK"
+        timestamptz created_at
+    }
+    JOBS {
+        uuid id PK "kept, never deleted"
+        uuid organization_id FK
+        text type "registered handler"
+        job_status status "queued, running, succeeded, failed"
+        int attempts "<= max_attempts"
+        int max_attempts "1-10, default 3"
+        timestamptz run_after
+        jsonb payload
+        jsonb result "nullable"
+        text last_error "nullable"
+        timestamptz locked_at "set only while running"
+        timestamptz finished_at "nullable"
+        text entity_type "nullable"
+        uuid entity_id "nullable"
+        bigint event_id FK "nullable"
+        uuid created_by "no FK"
+        timestamptz created_at
+        timestamptz updated_at "trigger"
+    }
+    AI_RUNS {
+        uuid id PK "append-only"
+        uuid organization_id FK
+        uuid job_id "nullable, no FK"
+        text task
+        text provider
+        text model
+        text served_model "nullable; differs after a fallback"
+        ai_run_outcome outcome
+        text error "nullable"
+        int input_tokens "nullable"
+        int output_tokens "nullable"
+        int cache_read_tokens "nullable"
+        int cache_write_tokens "nullable"
+        numeric estimated_cost_usd "nullable"
+        int latency_ms
+        uuid created_by "no FK"
         timestamptz created_at
     }
 ```
@@ -778,39 +856,7 @@ function call, so a failure leaves none behind. The first member is `executive_a
 Every file in the system is a `documents` row (company or tender document) with one or more
 immutable `document_versions`. A renewed certificate is a new version; the old one stays.
 
-```mermaid
-erDiagram
-    ORGANIZATIONS ||--o{ DOCUMENTS : "organization_id (FK, on delete cascade)"
-    DOCUMENTS ||--|{ DOCUMENT_VERSIONS : "(document_id, organization_id) (FK, cascade)"
-    DOCUMENTS |o--o| DOCUMENT_VERSIONS : "current_version_id (same document)"
-
-    DOCUMENTS {
-        uuid id PK
-        uuid organization_id FK "NOT NULL"
-        document_kind kind "company | tender"
-        text title "NOT NULL, 1-300 visible chars"
-        text category "nullable slug, list defined in E2"
-        uuid current_version_id FK "newest version, set by add_document_version"
-        uuid created_by "no FK"
-        timestamptz created_at
-        timestamptz updated_at "trigger-maintained"
-        timestamptz archived_at "archive, never delete"
-    }
-
-    DOCUMENT_VERSIONS {
-        uuid id PK
-        uuid organization_id "NOT NULL, = the document's"
-        uuid document_id FK "NOT NULL"
-        int version_number "1, 2, 3... per document"
-        text storage_path "UNIQUE, = org/document/version id"
-        text sha256 "64 hex"
-        bigint size_bytes "> 0"
-        text mime_type "sniffed from the bytes"
-        text original_file_name
-        uuid uploaded_by "no FK"
-        timestamptz uploaded_at
-    }
-```
+Their columns and keys are in the diagram under "Built today" above.
 
 **Immutable, at three layers.** Users hold only `SELECT`. The service role holds `SELECT,
 INSERT` on versions and `SELECT, INSERT, UPDATE` on documents, and no `DELETE` on either.

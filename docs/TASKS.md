@@ -184,11 +184,138 @@ company (not test data), created by the user after the redeploy, exist in the de
 - `[DONE]` **E1.5.4** — Documents and versions: `documents` (company, kind company/tender, title, category, current version, archived at) and `document_versions` (company, document, version number, storage path, SHA-256, size, MIME type, original file name, uploaded by, uploaded at). Versions immutable (no update/delete for anyone). Private storage bucket with company-scoped paths and storage policies. One server helper that hashes, detects duplicates within the company, stores the file and creates the version. `verify:rls` covers cross-company file access. _(2026-10-08 18:27 SAST)_ Helper `uploadDocumentFile` (server) over `storeDocumentVersion` (core, testable); one service-role function `add_document_version` records document, version, current pointer and the `document.uploaded` audit entry in one transaction. File type sniffed from the bytes. No UI (E2.2). Vercel's 4.5 MB request limit noted for E2.2.
 - `[DONE]` **E1.5.5** — Domain events and jobs: `domain_events` (company, type, entity, payload, actor, time) and `jobs` (company, type, status, attempts, max attempts, run after, payload, result, error, locked at, linked entity). One helper records an event and optionally enqueues a job. Job runner: a protected route that claims jobs safely (`FOR UPDATE SKIP LOCKED` via a database function), dispatches by type to registered handlers, retries with backoff. Kick the runner right after enqueue (Next.js `after()`), with a Vercel Cron as safety net (Hobby plan cron runs at most daily; note the plan limit in the docs). A `ping` job type for tests. _(2026-10-08 18:42 SAST)_ `record_domain_event` (event + optional job, one transaction) and `claim_jobs` (SKIP LOCKED, stale reclaim) are service-role functions; runner core is pure and unit-tested; `GET /api/jobs/run` needs `Authorization: Bearer $CRON_SECRET` and refuses all requests until you add the secret in Vercel; daily cron 01:00 UTC; `recordDomainEvent` kicks the runner with `after()`. Uploads and onboarding now record domain events. No production path queues a job yet, so the `after()` kick has no E2E until E2.2.
 - `[DONE]` **E1.5.6** — AI gateway: `src/lib/ai/` with a provider-neutral interface (task, input files, Zod output schema → validated result), an Anthropic adapter (`claude-opus-5-5`), task-to-model routing in one config, timeouts and typed errors, and `ai_runs` (company, job, provider, model, task, tokens, estimated cost, latency, outcome, error). A fake provider for tests. One live run (skipped when no key) once the client's Anthropic invite arrives. _(2026-10-08 18:59 SAST)_ `src/lib/ai/`: provider-neutral `AiProvider`, task routing in `config.ts` (four tasks, all `claude-opus-5-5`), Zod-validated output, one typed `AiError` (code + retryable), timeouts that abort, `ai_runs` logging for every outcome, refusal fallbacks (`fallbacks: "default"`), fake provider for all tests, offline adapter tests with a fake `fetch`. `@anthropic-ai/sdk` 0.132.1 pinned; ESLint confines it to the adapter. `ANTHROPIC_API_KEY` optional. **Live run skipped: no key yet** (`npm run test:ai-live` once the client's invite arrives).
-- `[TODO]` **E1.5.7** — Wrap-up: ER diagram and API_AND_DATA_FLOW.md match what was built; full suite green; demo notes for the client (what exists now and how later modules plug in).
+- `[DONE]` **E1.5.7** — Wrap-up: ER diagram and API_AND_DATA_FLOW.md match what was built; full suite green; demo notes for the client (what exists now and how later modules plug in). _(2026-10-08 19:07 SAST)_ ER diagram redrawn from the hosted schema's foreign keys (all nine built tables); API register checked against every action, route, helper and RPC in the code. A fresh clone of `main` failed `typecheck` (Next's route types are generated), so `typecheck` now runs `next typegen` first. Demo notes in the Handoff notes.
 
 **Cut line:** Vercel Cron safety net (E1.5.5) can wait if the after-enqueue kick works; `viewer` role (E1.5.3).
 
-**Handoff notes:** _(write at end of session)_
+**Handoff notes** _(written 2026-10-08, end of the E1.5 session)_
+
+**Built (E1.5.1–E1.5.7 done; nothing cut).** The architecture sent to the client is in
+ARCHITECTURE.md (§1 system, §8 Phase 1 tables, conventions and the complete built ER diagram,
+§10 entity map, §11 roadmap, §12 reuse map, decisions #26–#50). Platform core:
+memberships with an active company and `switch_organization`; one permission matrix with a
+read-only `viewer` role; documents with immutable, SHA-256-hashed versions in a private
+bucket; domain events, jobs and a job runner (`GET /api/jobs/run`, daily cron, `after()`
+kick); a provider-neutral AI gateway with `ai_runs`. Nine migrations, all applied to the
+hosted dev project. `verify:rls` 59/59, `test:unit` 50/50, `test:e2e` 37/37, also on a fresh
+clone of `main`. No UI changes apart from a "No active company" message on onboarding.
+
+**What you need to do by hand:**
+
+1. **Add `CRON_SECRET` in Vercel** (Project → Settings → Environment Variables, Production
+   and Preview, mark Sensitive): at least 16 random characters, e.g. the output of
+   `openssl rand -hex 32`. Also put it in `.env.local` if you want to call the runner
+   yourself. Redeploy, then check:
+   `curl -H "Authorization: Bearer <secret>" https://ai-procurement-os.vercel.app/api/jobs/run`
+   should answer `{"succeeded":0,"retrying":0,"failed":0}` (today it answers 503 by design).
+   Vercel then calls it daily at 01:00 UTC.
+2. **Add `ANTHROPIC_API_KEY` once the client's Anthropic invite arrives**: in `.env.local`
+   and in Vercel (Sensitive, never `NEXT_PUBLIC_`). Set a monthly spend limit in the
+   Anthropic console first. Then run `npm run test:ai-live` (one tiny Claude Opus 5.5 call,
+   well under US$0.05) and note the result in this epic's completion log.
+3. **Decide on upgrading Next.js 16.3.4 → 16.3.8** (patch release). `npm audit` reports
+   seven critical advisories fixed there (RCE in `next/og`, SSRF in image optimisation,
+   cache poisoning, …). Most concern features this app does not use, but the site is
+   public. Recommended as a small chore before E2; not done here because it was not an
+   E1.5 dependency. `sharp` and `source-map-js` (dev/build) also have fixes available.
+4. **Supabase → Authentication → Password security: leaked-password protection** is off
+   (the one remaining database-advisor warning). It may need a paid plan.
+5. Still open from E1: Supabase auth Site URL and redirect URLs (E1 step 2) and the email
+   delivery decision (E1 step 3), if not done yet.
+6. No action, for awareness: from **30 Oct 2026** Supabase stops granting new tables to the
+   API automatically. Every migration here already grants explicitly, including to
+   `service_role`; keep doing that.
+
+**Decisions and gotchas.**
+
+- **Active company.** `profiles.active_organization_id` is a preference only.
+  `private.current_organization_id()` picks the person's chosen company if it is among their
+  **active** memberships, else their oldest active one, else nothing (fail closed). A forged
+  or stale value grants nothing (`verify:rls` writes one as the service role; a mutation
+  test proved the check bites). Only the active company's `organizations` row is visible, so
+  `getMembership()` gets exactly one row through RLS. Co-members cannot read a person's
+  selection (column grants: `select *` on `profiles` fails for users). No switcher UI: nobody
+  has a second membership until invitations exist. A person whose memberships are all
+  removed sees "No active company" on onboarding; onboarding never creates a second first
+  workspace.
+- **Job runner limits (Vercel Hobby).** Cron runs once a day (within the hour). A function
+  runs at most 300 s; one drain has a 200 s budget and claims only as many jobs as could
+  all finish at their longest timeout. **One handler with a timeout over 200 s stops the runner
+  claiming any job at all** (claims are sized by the longest handler timeout): keep every
+  handler's timeout under 200 s and above its AI task's timeout (AI
+  reading tasks are set to 170 s). A retry due in more than 60 s waits for the next enqueue
+  or the daily cron; E2 should kick the runner when someone opens a page with pending jobs.
+  Jobs are global: any kick runs every company's due jobs.
+- **Writes that matter happen in the database.** `add_document_version` records the version,
+  current pointer, `document.uploaded` audit entry and domain event in one transaction, and
+  re-checks duplicates under an advisory lock (`PT409`). TypeScript-side writes use
+  `recordAuditEvent` / `recordDomainEvent`.
+- **Uploads in E2.2.** Vercel accepts request bodies up to 4.5 MB, so a Server Action can pass
+  only small files to `uploadDocumentFile`; larger scans need a direct upload to a narrowly
+  scoped staging path that the server then hashes and records. Storage files do not cascade
+  when a company is deleted (tests remove their own).
+- **The `after()` kick has no E2E yet**: no production path queues a job until E2.2's upload.
+  The runner route and the runner logic are tested.
+- **Incidents, both fixed within minutes.** (1) Step 1 of memberships gave `profiles` a
+  second foreign key to `organizations`, which made the deployed app's embed ambiguous
+  (PGRST201) for signed-in pages until a hotfix named the key. (2) I created the step 4
+  migration file before pushing step 2; `supabase db push` pushes **every** pending file, so
+  the column drop reached the hosted database before the code that stopped reading it was
+  deployed, and signed-in pages failed until that code deployed (a few minutes). Rules
+  since: create a migration file only when the previous one is pushed, read the dry-run list
+  every time, and keep schema changes deploy-compatible with the code that is live.
+- **This machine's network drops** (`net::ERR_NETWORK_CHANGED`, `fetch failed`, pooler
+  timeouts): re-run, never weaken a test. Never run two Playwright runs at once (they share
+  `test-results/`), and avoid E2E while other network-heavy jobs run. Supabase's
+  `JWT issued at future` appeared three times in fixture setup; it passes on re-run.
+- **Local Supabase now includes Storage**: `npx supabase start -x
+realtime,imgproxy,edge-runtime,logflare,vector,supavisor,studio,postgres-meta`. The DB
+  container is `supabase_db_xrrbrwcnlhtcceaedazp` (psql through `docker exec`). `supabase gen
+types --local` needs the postgres-meta image (its pull stalled); generate types with
+  `npm run db:types` after the hosted push instead. `npx supabase db advisors` checks
+  **local** by default; add `--linked` for hosted.
+- **Unit tests run TypeScript through Node's type stripping**: modules they load use `.ts`
+  extensions on relative imports, `import type` for type-only imports, and no constructor
+  parameter properties.
+- `npm run typecheck` now runs `next typegen` first: a fresh clone could not typecheck
+  (route types are generated), found by the clean-checkout run.
+- New npm scripts: `test:ai-live` (opt-in). New env vars, both optional: `CRON_SECRET`,
+  `ANTHROPIC_API_KEY` (see `.env.local.example`).
+
+**Cut, blocked or stashed:** nothing cut (the `viewer` role and the cron safety net, both on
+the cut line, were built); the live AI run is skipped until the key exists; no stashes. The
+client's approval of the architecture and Milestone 1.5 is still pending; the work was done
+ahead of it.
+
+**Demo notes for the client** (Milestone 1.5, platform foundation):
+
+- _What exists now._ The shared foundation every module will use, in the code and tested
+  automatically on every change:
+  - **Companies and people.** One login can belong to several companies and always works in
+    one at a time; access follows that company. Nobody can add themselves to a company or
+    raise their own role; 59 automatic security checks prove one company cannot see or
+    change another's data.
+  - **Roles from one table.** Executive approver, bid manager, pricing specialist, and a new
+    read-only viewer. New roles from the booklet are added to that table, not to screens.
+  - **Documents.** Every file is stored as a document with versions. Each version is
+    fingerprinted (SHA-256), never overwritten or deleted, kept private to the company, and
+    an identical file uploaded twice is recognised.
+  - **History.** Every important change writes an audit entry and a business event.
+  - **Background work.** Slow work such as AI reading runs as jobs that retry automatically
+    and record their errors.
+  - **AI gateway.** All AI goes through one gateway: Claude Opus 5.5 first, another provider
+    later is an adapter, not a rewrite. Every call is logged with model, tokens, estimated
+    cost and time, and answers must match a strict format before anything is saved.
+  - The screens look the same as at Milestone 1; this milestone is the foundation.
+- _How the next modules plug in._ Milestone 2: the upload screen stores files through the
+  document store, which records a "document uploaded" event; a reading job asks the
+  gateway to read the document; the facts come back as "pending review" for his team to
+  confirm. Milestone 3 reuses the same path for tenders. Later modules add tables that
+  follow the same conventions, new job types for new background work and AI agents, new
+  gateway tasks for new AI work, and new rows in the role table.
+- _To show him._ The live link (sign up and onboarding as before), ARCHITECTURE.md in the
+  repository once he has GitHub access, and a `verify:rls` run (each security check printed
+  as PASS).
 
 ---
 
@@ -274,16 +401,16 @@ company (not test data), created by the user after the redeploy, exist in the de
 
 | Item                                                          | Needed by             | Status                                     |
 | ------------------------------------------------------------- | --------------------- | ------------------------------------------ |
-| Approval of the architecture and roadmap document             | E1.5                  | Sent 8 Oct                                 |
+| Approval of the architecture and roadmap document             | E1.5                  | Sent 8 Oct; E1.5 built ahead of it (8 Oct) |
 | Approval of Milestone 1.5 (R2,000) and the 18 Nov completion  | E1.5                  | Sent 8 Oct                                 |
 | First 50% of Milestone 1.5                                    | E1.5                  | After approval                             |
 | GitHub username, for read access to the repository            | E1.5                  | Requested in the architecture document     |
-| Anthropic account with a developer invite to "Procurement OS" | E1.5.6 live run, E2.3 | Steps sent                                 |
+| Anthropic account with a developer invite to "Procurement OS" | E1.5.6 live run, E2.3 | Steps sent; gateway built, live run waits  |
 | Written POPIA consent for AI processing of company documents  | E2.7                  | Requested in the architecture document     |
 | City of Tshwane Q02-O1-2026-27 tender PDF (32 pages)          | E3.7                  | Not received; the two RFQ PDFs are in hand |
 | Vercel and Supabase accounts in his name                      | E5.4                  | Not requested yet                          |
 
-**Waiting on us:** E1.9's manual steps (Vercel env vars, Supabase auth URLs, email delivery decision); see E1 handoff notes.
+**Waiting on us:** `CRON_SECRET` in Vercel, the Next.js 16.3.8 upgrade decision and leaked-password protection (E1.5 handoff notes); Supabase auth URLs and the email delivery decision (E1 handoff notes, steps 2–3).
 
 ## Roadmap after Phase 1
 
@@ -315,3 +442,4 @@ Each stage is scoped and quoted separately. Build numbers refer to the client's 
 | E1.5.4 | 2026-10-08 18:27 SAST | `main`                      | 2 migrations tried locally first (numbering, immutability as owner and service role, company cascade with the two-way FK), dry runs listed only them, `db:push` ✅ · advisors clean except Auth leaked-password protection · `db:types` ✅ · `verify:rls` 51/51 hosted + local ✅ (no cross-company read/list/signed URL/overwrite/delete of files; no direct writes; versions immutable even for the service role; storage policy mutation-tested) · `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:unit` 19/19 ✅ · `test:e2e` 32/32 ✅ (7 document-store tests against the real DB and storage) · code review: 3 fixed (audit entry lost on retry, archived documents blocking re-upload, simultaneous duplicates) ✅ |
 | E1.5.5 | 2026-10-08 18:42 SAST | `main`                      | migration tried locally (atomic event + job, two concurrent claims skip each other's job, stale reclaim, exhausted → failed, events immutable, cascade) then `db:push` (dry run listed only it) ✅ · advisors clean except Auth leaked-password protection · `db:types` ✅ · `verify:rls` 57/57 hosted + local ✅ · `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:unit` 32/32 ✅ (backoff, retry, last attempt, permanent, unknown type, bad payload, timeout + abort, drain waits, budget-sized claims) · `test:e2e` 35/35 ✅ (runner refuses without secret; ping → succeeded; failing ping → failed with error; onboarding and uploads record domain events) · code review: claims now sized to the time budget ✅   |
 | E1.5.6 | 2026-10-08 18:59 SAST | `main`                      | migration tried locally (append-only for owner and service role, company cascade), dry run listed only it, `db:push` ✅ · advisors clean except Auth leaked-password protection · `db:types` ✅ · `verify:rls` 59/59 hosted + local ✅ · `typecheck` ✅ · `lint` ✅ (SDK import refused outside the adapter) · `format` ✅ · `build` ✅ (no `ANTHROPIC_API_KEY`) · `test:unit` 50/50 ✅ (gateway with fake provider; adapter offline: request body, headers, refusal, truncation, errors, unconvertible schema; boundary) · `test:e2e` 37/37 ✅ (`ai_runs` rows for success and not-configured) · `test:ai-live` skipped (no key) · code review: schema conversion errors made non-retryable ✅                                         |
+| E1.5.7 | 2026-10-08 19:07 SAST | `main`                      | fresh clone of `main` (`524fd9f`) with `npm ci`: `typecheck` failed without generated route types → fixed (`next typegen && tsc`); then `lint` ✅ · `format` ✅ · `test:unit` 50/50 ✅ · `test:e2e` 37/37 ✅ · `verify:rls` 59/59 ✅ · live site after E1.5.6: smoke, shell, onboarding, jobs 13 passed, 2 skipped (need `CRON_SECRET`) ✅ (an earlier run hit `net::ERR_NETWORK_CHANGED` on this machine; no test data left) · docs: ER diagram and API register match the code ✅ · code review: runner-limit warning corrected, ticket status fixed (a third finding was a false positive) ✅                                                                                                                                        |
