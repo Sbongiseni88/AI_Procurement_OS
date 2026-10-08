@@ -81,13 +81,13 @@ From the client's requirements of 8 Oct 2026. A ticket that cannot follow one of
 - `[DONE]` **E1.6** — Design pass: write a short design plan (frontend-design), then define the token set in `globals.css` (the old prototype palette is already removed; only a neutral base remains). Status tokens for the Phase 1 set: compliant, expiring, expired, missing, conflict, needs verification, unable to verify. One `StatusPill` component. Update ARCHITECTURE.md §6. _(2026-10-08 15:41 SAST)_
 - `[DONE]` **E1.7** — App shell: sidebar (Dashboard, Tenders, Company documents, Settings), header with company and user menu, responsive to phone width. _(2026-10-08 15:47 SAST)_
 - `[DONE]` **E1.8** — Dashboard and tender board layout with real empty states (no fake numbers): "No tenders yet — upload your first tender" etc. Board columns follow the tender stages planned in E3. _(2026-10-08 15:51 SAST)_
-- `[TODO]` **E1.9** — Deploy check: the GitHub repo is already linked to Vercel, so pushes to `main` deploy. Confirm the Vercel env vars are set, add the Vercel URL to Supabase auth Site URL / redirect URLs, smoke test sign-up and log-in on the live URL, then hand the link to the user to send. Update ARCHITECTURE.md §5 to current models (Claude Opus 5.5 for reading; matching in E4 is deterministic code, not AI). **Blocked on you (see Handoff notes, steps 1–4):** Vercel has no `NEXT_PUBLIC_*` env vars, so every deploy since E1.3 fails and the live site still serves the E1.2 placeholder; the Supabase auth URLs are dashboard-only. Done in this session: smoke test `tests/e2e/smoke.spec.ts` (passes locally against `next start`), ARCHITECTURE §5 updated, live run attempted and failing as expected _(2026-10-08 15:53 SAST)_.
+- `[DONE]` **E1.9** — Deploy check: the GitHub repo is already linked to Vercel, so pushes to `main` deploy. Confirm the Vercel env vars are set, add the Vercel URL to Supabase auth Site URL / redirect URLs, smoke test sign-up and log-in on the live URL, then hand the link to the user to send. Update ARCHITECTURE.md §5 to current models (Claude Opus 5.5 for reading; matching in E4 is deterministic code, not AI). _(2026-10-08 17:18 SAST)_ Vercel env vars set by the user (exact `NEXT_PUBLIC_` names required); live site deployed; smoke and auth E2E pass against the live URL.
 
 **Cut line:** E1.8 board polish; password reset (E1.3) can slip to E5.
 
 **Handoff notes** _(written 2026-10-08 15:53 SAST, end of the E1 session)_
 
-**Built (E1.1–E1.8 done, E1.9 blocked on the steps below).** Auth (sign up, log in, log out,
+**Built (E1.1–E1.9 done; steps 2–3 below are still yours).** Auth (sign up, log in, log out,
 password reset) with `proxy.ts` route protection; onboarding (`complete_onboarding` →
 `private.create_workspace`) creating the company and its first member as executive approver;
 append-only `audit_events` with one server write helper, onboarding logged; the design
@@ -98,7 +98,7 @@ Three new migrations are applied to the hosted dev project. `verify:rls` is 27/2
 
 **What you need to do by hand, in order:**
 
-1. **Vercel → Project → Settings → Environment Variables** (Production and Preview), then
+1. ✅ _Done by the user. Keep these exact names: Vercel's warning about `NEXT_PUBLIC_` keys is expected for the URL and the publishable key, and those two must not be Sensitive._ **Vercel → Project → Settings → Environment Variables** (Production and Preview), then
    redeploy the latest `main` (Deployments → ⋯ → Redeploy). Every deploy since `403583b`
    (E1.3) failed with `Invalid public environment configuration: NEXT_PUBLIC_SUPABASE_URL`
    (reproduced locally by building without `.env.local`). Vercel kept serving the E1.2
@@ -123,7 +123,7 @@ Three new migrations are applied to the hosted dev project. `verify:rls` is 27/2
    link to `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=signup&next=/` (and
    `type=recovery&next=/reset-password`). The default links use PKCE and only work in the
    browser that asked for the email; `/auth/callback` already accepts both.
-4. **After steps 1–2, run the live smoke test** (creates and deletes its own user):
+4. ✅ _Done: 11/11 against the live URL._ **After steps 1–2, run the live smoke test** (creates and deletes its own user):
    `PLAYWRIGHT_BASE_URL=https://ai-procurement-os.vercel.app npx playwright test smoke`,
    then mark E1.9 `[DONE]` and send the link.
 5. Your Vercel CLI login on this machine has expired (`vercel login` if you want the CLI).
@@ -162,11 +162,11 @@ realtime,storage-api,imgproxy,edge-runtime,logflare,vector,supavisor,studio,post
   `a8fd7cd`). An empty, untracked `src/app/api/` folder exists; I left it alone. Prettier
   now reads `globals.css` (`tailwindStylesheet`), so class order changed in a few files.
 
-**Cut or stashed:** nothing cut, no stashes. E1.9 is blocked only on steps 1–4 above.
+**Cut or stashed:** nothing cut, no stashes.
 
-**Live URL status:** https://ai-procurement-os.vercel.app returns 200 but serves the E1.2
-placeholder (`/login` is 404). Latest `main` builds locally and passes everything; it needs
-the env vars to deploy.
+**Live URL status:** https://ai-procurement-os.vercel.app is live on the E1 build (2026-10-08 17:18 SAST): `/`
+redirects to `/login`, and the smoke and auth tests pass against it. One real account and
+company (not test data), created by the user after the redeploy, exist in the dev project.
 
 ---
 
@@ -308,4 +308,4 @@ Each stage is scoped and quoted separately. Build numbers refer to the client's 
 | E1.6 | 2026-10-08 15:41 SAST | `main`                      | design plan in ARCHITECTURE §6 before code ✅ · tokens + 7 status tokens, `StatusPill` ✅ · contrast all text ≥ 4.9:1, control borders 3:1 ✅ · no green/purple/gradients ✅ · screenshots 1280/390 ✅ · audit ✅ · `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:e2e` 16/16 ✅ · code review fixes ✅                                                                                                                                                                            |
 | E1.7 | 2026-10-08 15:47 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:unit` 7/7 ✅ · `test:e2e` 21/21 ✅ (sidebar nav + `aria-current`, account menu incl. Esc and link-close, settings data, phone drawer, no sideways scroll at 390px on every page) · screenshots 1280/390 ✅ · audit fixes (drawer backdrop, invalid aria-label) ✅ · code review fix (menu closes on navigation) ✅                                                                                                                  |
 | E1.8 | 2026-10-08 15:51 SAST | `main`                      | `typecheck` ✅ · `lint` ✅ · `format` ✅ · `build` ✅ · `test:unit` 7/7 ✅ · `test:e2e` 23/23 ✅ (dashboard empty states + legend; board has 4 stage columns at 0, no sample tenders, upload disabled with its reason) · screenshots 1280/390 ✅ · audit ✅ · code review fix (upload note copy) ✅                                                                                                                                                                                               |
-| E1.9 | — (blocked)           | `main`                      | smoke journey `tests/e2e/smoke.spec.ts` ✅ locally against `next start` · against the live URL ✘ (old deploy, `/auth/callback` 404) · Vercel deploys failing since E1.3 on missing env vars (reproduced locally) · test data cleaned up (0 users / orgs / events) ✅ · ARCHITECTURE §5 updated ✅                                                                                                                                                                                                 |
+| E1.9 | 2026-10-08 17:18 SAST | `main`                      | live: `/` → 307 `/login` ✅ · `smoke` + `auth` E2E against the live URL 11/11 ✅ (incl. `no-store` on every auth-cookie response through Vercel's CDN) · test data cleaned up ✅ · deploy failures were Vercel env vars named without `NEXT_PUBLIC_`, fixed by the user ✅ · flaky first log-in fixed (Playwright `expect` timeout 10 s) ✅                                                                                                                                                       |

@@ -25,6 +25,9 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],
+  // The first log-in on a freshly started server (or a cold Vercel function) can take
+  // longer than the 5 s default while every worker starts at once.
+  expect: { timeout: 10_000 },
   use: {
     baseURL: externalBaseUrl ?? `http://localhost:${PORT}`,
     trace: "retain-on-failure",
