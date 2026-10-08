@@ -1,35 +1,58 @@
-# Task Board — AI Procurement OS, Phase 1: Tender Compliance Checker
+# Task Board — AI Procurement OS, Phase 1 (first production module)
 
 **Legend:** `[TODO]` · `[IN PROGRESS]` · `[DONE]` · `[CUT]` (dropped to protect the deadline, moved to Later)
-**Deadline:** Phase 1 complete **Fri 13 Nov 2026**. Each epic below is one client milestone with a demo and sign-off.
+**Deadline:** Phase 1 complete **Wed 18 Nov 2026**. Each epic below is one client milestone with a demo and sign-off.
+
+Phase 1 is **not a standalone compliance app**. It is the first production module of the full AI Procurement OS, built on a platform core (tenancy, memberships, permissions, audit, versioned documents, events and jobs, AI gateway) that every later module reuses. The client-approved architecture and roadmap is the source of truth for design decisions (`AI_Procurement_OS_Architecture_and_Roadmap.pdf`, 8 Oct 2026; written into ARCHITECTURE.md in E1.5.1).
 
 ## Working agreement
 
 - **One epic per Claude session.** Start each epic in a fresh session. Begin with that epic's _Session start_ block; finish by writing its _Handoff notes_ so the next session can start cold.
 - **One ticket at a time.** Wait for the go-ahead before each ticket. Work directly on `main`; no task branches. **Every push to `main` deploys to Vercel**, so push only when every check is green. Never force-push.
-- **Done means:** `typecheck` + `lint` + `format:check` + `build` pass; new user journeys have a Playwright test; UI tickets pass a `web-design-guidelines` audit; docs updated; ticket marked `[DONE]` with timestamp; committed and pushed to `main`.
+- **Done means:** `typecheck` + `lint` + `format:check` + `build` pass; `test:unit` and `test:e2e` pass; `verify:rls` covers every new table, function and storage policy; new user journeys have a Playwright test; UI tickets pass a `web-design-guidelines` audit; docs updated; ticket marked `[DONE]` with timestamp; committed and pushed to `main`.
 - **Keep it small.** Build only what the ticket says. No new library unless the ticket needs it. If a ticket grows past ~1 day, split it and ask.
 - **UI:** minimal, work-management style, no "AI slop" (see CLAUDE.md §1.2). Use the `frontend-design` skill to build, `web-design-guidelines` to audit.
-- **Database:** load `supabase` + `supabase-postgres-best-practices` skills before any migration or RLS change. Applied migrations are never edited; changes go in a new migration.
+- **Database:** load `supabase` + `supabase-postgres-best-practices` skills before any migration or RLS change. Applied migrations are never edited; changes go in a new migration. Try migrations on local Supabase first (see E1 handoff notes), then `db:push`.
+- **AI in tests:** E2E and unit tests use the gateway's fake provider and never spend money. Only tickets that say "live run" call Anthropic.
 - **Client data:** real client documents live only in `/fixtures/private/` (git-ignored). Committed tests use synthetic data.
-- **Cut line:** each epic marks which tickets get trimmed first if we fall behind. Expiry and certification checks are never cut; they are what the client is buying.
+- **Milestone tags:** when the client signs off a milestone, tag `main` with an annotated tag (`m1`, `m1.5`, `m2` … `m5`) and push the tag.
+- **Cut line:** each epic marks which tickets get trimmed first if we fall behind. Platform-core conventions and expiry/certification reading are never cut.
+
+## Architecture rules (apply to every ticket)
+
+From the client's requirements of 8 Oct 2026. A ticket that cannot follow one of these stops and asks.
+
+1. **Every business record belongs to a company.** Required `organization_id` + the standard RLS policy on every business table, now and in future modules.
+2. **Tenancy through memberships.** A person can belong to several companies (`memberships`); access follows the active membership. Never key access on a single company stored on the user.
+3. **Permissions from one matrix.** Server actions check `can(role, action)` from the single permission matrix; RLS enforces tenancy and the sensitive writes.
+4. **Files only through `documents` + `document_versions`.** SHA-256 hash, immutable versions, originals never overwritten or deleted.
+5. **AI output only through `extracted_facts`.** Every fact keeps document version, page, quote, confidence, producing AI run and review status. Only confirmed facts feed rules.
+6. **AI only through the AI gateway** (`src/lib/ai/`), provider-neutral, every call logged in `ai_runs`. No other file imports a provider SDK.
+7. **Background work only through `jobs`.** Anything slow (AI reading) is a job with retries; future agents are new job types.
+8. **Every material change** writes an `audit_events` entry and a `domain_events` entry.
+9. **Rules come from the tender.** No default certification period or document-age limit anywhere. A rule exists only if the tender states it, stored with its page and quote. If the tender is silent, no limit is applied.
+10. **Archive, don't delete.** Business records and evidence history are archived, never hard-deleted.
+11. **Design for the full platform, build for Phase 1.** Future-module tables (suppliers, BOQs, submissions, projects…) are designed in ARCHITECTURE.md but created only when their module is built.
 
 ## Schedule
 
-| Epic | Milestone                           | Dates          | Demo to client                                            |
-| ---- | ----------------------------------- | -------------- | --------------------------------------------------------- |
-| E0   | Repository foundation (done)        | 8 Sep          | —                                                         |
-| E1   | Foundation and preview              | 9 – 15 Oct     | Live Vercel link: sign up, workspace, dashboard, board    |
-| E2   | Company DNA vault and expiry checks | 16 – 26 Oct    | Upload his pack; AI reads dates and stamps; flags expired |
-| E3   | Tender reading                      | 27 Oct – 2 Nov | Upload a tender; facts and returnables with page links    |
-| E4   | Compliance check and gap report     | 3 – 9 Nov      | Requirement-by-requirement status and gap report          |
-| E5   | Pilot and handover                  | 10 – 13 Nov    | Real tenders + his pack, live on his accounts             |
+| Epic | Milestone                       | Dates          | Demo to client                                                                                |
+| ---- | ------------------------------- | -------------- | --------------------------------------------------------------------------------------------- |
+| E0   | Repository foundation (done)    | 8 Sep          | —                                                                                             |
+| E1   | Foundation and preview          | Done 8 Oct     | Live link: sign up, workspace, dashboard, board (after E1.9)                                  |
+| E1.5 | Platform foundation             | 12 – 16 Oct    | Architecture in the repo; memberships, versioned documents, jobs, AI gateway working in tests |
+| E2   | Company DNA and evidence        | 19 – 28 Oct    | Upload his pack; AI reads dates and stamps; review; validity status                           |
+| E3   | Tender reading and Digital Twin | 29 Oct – 4 Nov | Upload a tender/RFQ; facts, returnables and stated rules with page links                      |
+| E4   | Compliance and gap report       | 5 – 11 Nov     | Requirement-by-requirement status, human decisions, gap report                                |
+| E5   | Pilot and handover              | 12 – 18 Nov    | Real tenders + his pack, live on his accounts                                                 |
 
 ## Phase 1 scope
 
-**In:** logins and one company workspace with roles · audit log · company document vault with AI reading of type, dates and certification stamps · expiry, expiring-soon and stale-certification checks · tender PDF reading with page references · requirement-to-document matching with statuses and cross-document conflict checks · gap report · tender board and dashboard.
+**Functionality:** Company onboarding → Company DNA → Tender/RFQ upload → AI tender reading → Requirements → Evidence matching → Compliance → Gap report → Human review. Plus the dashboard and tender board.
 
-**Out (Later phases):** bid / no-bid scoring · BOQ and pricing · MBD form filling · submission pack, approval gate and lock · selling to other companies (sign-up, billing, plans) · suppliers and RFQs · projects, logistics, finance · email/WhatsApp/portal integrations · proving a stamp is genuine (Phase 1 only reads and dates it; a person confirms).
+**Platform core built now (reused by every later module):** companies, memberships and permission matrix · append-only audit log · versioned, hashed documents · extracted facts with sources · domain events, jobs and job runner · provider-neutral AI gateway with run log · extensible Tender Digital Twin · requirement rule engine.
+
+**Not in Phase 1** (see Roadmap): everything in V1, V1.5/V2 and Later, including proving a stamp or document is genuine (Phase 1 reads and dates stamps; a person confirms).
 
 ---
 
@@ -147,77 +170,99 @@ the env vars to deploy.
 
 ---
 
-## E2 · Company DNA vault and expiry checks — 16 – 26 Oct
+## E1.5 · Platform foundation — 12 – 16 Oct
 
-**Goal:** Thulani uploads his company pack; the system reads each document's type, issuer, dates and certification stamp, flags expired, expiring and stale certified copies, and his team confirms what the AI read.
+**Goal:** the shared platform core the client asked for is in place before any module uses it: the agreed architecture written into the repo, memberships and a permission matrix, versioned hashed documents, domain events with a job runner, and a provider-neutral AI gateway.
 
-**Session start:** read CLAUDE.md, E1 handoff notes, this epic, ARCHITECTURE.md §5 and §8. Skills: `supabase-postgres-best-practices`, `supabase`, `frontend-design`, `claude-api`. Needs the Anthropic workspace invite (see Waiting).
+**Starts only after** the client approves the architecture document and Milestone 1.5 (see Waiting on the client).
 
-- `[TODO]` **E2.1** — Schema: `company_documents` (category, file path, SHA-256, size, uploaded by, AI-read fields, review status, reviewer, reviewed at) and `ai_runs` (model, purpose, input/output tokens, cost, latency, outcome). Validity settings on `organizations`: certified-copy max age (default 90 days), statement max age (90), expiring-soon window (30). Private storage bucket with org-scoped paths and policies. Extend `verify:rls`.
-- `[TODO]` **E2.2** — Upload: server action with type check (PDF, JPG, PNG), size limit, SHA-256 duplicate detection ("You already uploaded this file on …"), category picker. Audit event per upload.
-- `[TODO]` **E2.3** — AI gateway: one server-only module (`src/lib/ai/`) wrapping the Anthropic SDK. Zod-validated structured output, timeouts, typed errors, writes an `ai_runs` row per call. No other file talks to Anthropic directly.
-- `[TODO]` **E2.4** — Document reading: send each document to Claude; extract document type, issuer, entity name, registration number, address, issue date, expiry date (or validity stated in the document), certification stamps (date, issuing office, page) and a confidence per field. Rules: never infer a missing value (return "not found"), never judge authenticity. Results saved as _pending review_.
-- `[TODO]` **E2.5** — Expiry engine: pure function, document + settings + today → `valid` / `expiring` / `expired` / `certification too old` / `date unknown`, with the reason. Unit tests with `node --test` (no new test library) using synthetic cases modelled on the sample pack (stamp 21 Jan 2026, statement 24 Nov 2025, affidavit valid 12 months).
-- `[TODO]` **E2.6** — Review screen: AI-read fields beside the document preview; confirm, correct or reject each field. Corrections and confirmations are audit-logged. Only confirmed values feed the checks.
-- `[TODO]` **E2.7** — Vault page: documents grouped by category with status pills, filter by status, "expiring in the next 30 days" list on the dashboard. Settings page to edit the three validity rules.
-- `[TODO]` **E2.8** — Run Thulani's real pack from `/fixtures/private/` (after his POPIA consent); compare against the five findings in the quote. E2E for upload → review → status. Deploy and demo.
+**Session start:** read CLAUDE.md, E1 handoff notes, this epic, the Architecture rules above, ARCHITECTURE.md §5, §7, §8, and the client's architecture PDF if provided. Skills: `supabase`, `supabase-postgres-best-practices`, `react-best-practices`, `claude-api`.
 
-**Cut line:** dashboard "expiring" list (E2.7); field-by-field correction can become confirm/reject only (E2.6).
+- `[TODO]` **E1.5.1** — Architecture in the repo: write the approved architecture into ARCHITECTURE.md (system diagram, Phase 1 data model and ER diagram, table conventions, full platform entity map, roadmap stages, reuse map) and add decision-log entries. Update CLAUDE.md §3 scope wording to "first production module" and add the Architecture rules. Docs only.
+- `[TODO]` **E1.5.2** — Memberships: `memberships` (organization, user, role, status, invited by, timestamps; unique per company and person). Backfill from `profiles`; move `current_organization_id()` / `current_user_role()` and every policy to the active membership; onboarding creates a membership. Drop `profiles.organization_id` and `profiles.role` in a follow-up migration once nothing reads them. `verify:rls`: a person in two companies sees only the active one, cannot add themselves to a company, cannot raise their own role.
+- `[TODO]` **E1.5.3** — Permission matrix: one module (`src/lib/auth/permissions.ts`) mapping roles to actions (documents upload/review, tenders create/review, requirements decide, members manage, settings edit, audit view). Add a read-only `viewer` role. Server actions call `can()`; unit tests for the matrix. Document how booklet roles are added later.
+- `[TODO]` **E1.5.4** — Documents and versions: `documents` (company, kind company/tender, title, category, current version, archived at) and `document_versions` (document, version number, storage path, SHA-256, size, MIME type, original file name, uploaded by, uploaded at). Versions immutable (no update/delete for anyone). Private storage bucket with company-scoped paths and storage policies. One server helper that hashes, detects duplicates within the company, stores the file and creates the version. `verify:rls` covers cross-company file access.
+- `[TODO]` **E1.5.5** — Domain events and jobs: `domain_events` (company, type, entity, payload, actor, time) and `jobs` (company, type, status, attempts, max attempts, run after, payload, result, error, locked at, linked entity). One helper records an event and optionally enqueues a job. Job runner: a protected route that claims jobs safely (`FOR UPDATE SKIP LOCKED` via a database function), dispatches by type to registered handlers, retries with backoff. Kick the runner right after enqueue (Next.js `after()`), with a Vercel Cron as safety net (Hobby plan cron runs at most daily; note the plan limit in the docs). A `ping` job type for tests.
+- `[TODO]` **E1.5.6** — AI gateway: `src/lib/ai/` with a provider-neutral interface (task, input files, Zod output schema → validated result), an Anthropic adapter (`claude-opus-5-5`), task-to-model routing in one config, timeouts and typed errors, and `ai_runs` (company, job, provider, model, task, tokens, estimated cost, latency, outcome, error). A fake provider for tests. One live run (skipped when no key) once the client's Anthropic invite arrives.
+- `[TODO]` **E1.5.7** — Wrap-up: ER diagram and API_AND_DATA_FLOW.md match what was built; full suite green; demo notes for the client (what exists now and how later modules plug in).
+
+**Cut line:** Vercel Cron safety net (E1.5.5) can wait if the after-enqueue kick works; `viewer` role (E1.5.3).
 
 **Handoff notes:** _(write at end of session)_
 
 ---
 
-## E3 · Tender reading — 27 Oct – 2 Nov
+## E2 · Company DNA and evidence — 19 – 28 Oct
 
-**Goal:** upload a tender or RFQ PDF and get its key facts and the list of returnable documents, each linked to the page it came from, ready for a person to confirm.
+**Goal:** Thulani uploads his company pack; each document is stored as a hashed version, the AI reads its type, issuer, dates and certification stamps as sourced facts, his team confirms them, and confirmed evidence shows its validity based on the document's own dates.
 
-**Session start:** read CLAUDE.md, E2 handoff notes, this epic, ARCHITECTURE.md §5, §8, §9. Skills: `supabase-postgres-best-practices`, `claude-api`, `frontend-design`. Needs the Tshwane PDF (see Waiting).
+**Session start:** read CLAUDE.md, E1.5 handoff notes, this epic, the Architecture rules, ARCHITECTURE.md §5 and §8. Skills: `supabase-postgres-best-practices`, `supabase`, `frontend-design`, `claude-api`.
 
-- `[TODO]` **E3.1** — Schema: `tenders` (reference, issuer, title, closing date/time, briefing date and whether compulsory, scoring 80/20 or 90/10, stage), `tender_documents` (file, SHA-256), `tender_requirements` (text, mandatory flag, mapped document category, validity rule in days if stated, source page, source quote, confidence, review status, override status and reason). RLS + `verify:rls`.
-- `[TODO]` **E3.2** — Upload tender PDF → create tender in stage "Reading". Original file stored unchanged.
-- `[TODO]` **E3.3** — Extraction through the AI gateway: key facts + returnable documents + validity rules ("certified within 3 months", "statement not older than 3 months"), each with page number and quote. Zod schema; "not found" instead of guesses. Generic for any tender; no Tshwane-specific code.
-- `[TODO]` **E3.4** — Requirement mapping: deterministic lookup from common wording (CSD report, tax compliance PIN, B-BBEE, CIPC, municipal account…) to document categories, with AI suggestion only where the lookup has no match. A person can change the mapping.
-- `[TODO]` **E3.5** — Tender page: facts with page references, requirement list, confirm/edit, stage shown on a simple stage tracker.
+- `[TODO]` **E2.1** — Schema: `extracted_facts` (company, subject type and id, document version, field, value, page, quote, confidence, produced by AI run or person, review status, reviewed by/at, superseded by) and `evidence_items` (company, document, category, holder, issue date, expiry date, stated validity, certification date and office, confirmed version). Company setting: expiring-soon reminder window (default 30 days; a reminder, not a compliance rule). RLS + `verify:rls`.
+- `[TODO]` **E2.2** — Upload: Company DNA upload by category through the E1.5.4 helper; uploading a renewed document adds a new version and keeps history. Audit + `document.uploaded` event + `document.read` job.
+- `[TODO]` **E2.3** — Reading job: the `document.read` handler calls the gateway task `read_company_document` and saves facts as pending review: document type, issuer, entity name, registration number, address, issue date, expiry date or validity stated in the document (e.g. "valid 12 months from the date signed by the commissioner"), every certification stamp (date, office, page). Never infer, never judge authenticity, "not found" instead of guesses. `document.read` event on completion; failures retried and visible.
+- `[TODO]` **E2.4** — Validity engine: pure function from confirmed facts + today → `valid` / `expiring soon` / `expired` / `no expiry stated` / `date unknown`, with the reason. Uses only the document's own expiry or its own stated validity. Certification age is shown as information ("certified 8 months ago"), never judged here; that needs a tender rule (E4). Unit tests from synthetic cases modelled on the sample pack.
+- `[TODO]` **E2.5** — Review screen: document preview beside the AI-read facts with page and quote; confirm, correct or reject each fact. Confirming creates or updates the evidence item. Audit + events.
+- `[TODO]` **E2.6** — Company DNA page: evidence by category with validity pills, version history per document, filter by status; dashboard "expiring soon" list; settings for the reminder window.
+- `[TODO]` **E2.7** — Live run on Thulani's real pack from `/fixtures/private/` (after his POPIA consent): the AI must read the SAPS stamp dates, the affidavit's stated 12-month validity and the CSD report's B-BBEE dates as facts. E2E (fake provider) for upload → read → review → validity. Deploy and demo.
+
+**Cut line:** dashboard "expiring soon" list (E2.6); field-by-field correction can become confirm/reject only (E2.5).
+
+**Handoff notes:** _(write at end of session)_
+
+---
+
+## E3 · Tender reading and Digital Twin — 29 Oct – 4 Nov
+
+**Goal:** upload a tender, RFQ, RFP or quotation request and get an extensible Digital Twin: key facts, returnable documents and conditions, and only the rules the tender actually states, each linked to its page and quote, ready for a person to confirm.
+
+**Session start:** read CLAUDE.md, E2 handoff notes, this epic, the Architecture rules, ARCHITECTURE.md §5, §8, §9. Skills: `supabase-postgres-best-practices`, `claude-api`, `frontend-design`. Needs the Tshwane PDF (see Waiting).
+
+- `[TODO]` **E3.1** — Schema: `tenders` (company, kind tender/RFQ/RFP/quotation, reference, title, issuer, closing date/time, briefing date and whether compulsory, scoring system, stage reusing `src/lib/tenders/stages.ts`), `tender_documents` (tender, document, role main/addendum/annexure/returnable form), `tender_requirements` (company, tender, wording, kind returnable document/condition/form, mandatory, document category, rule, source document version, page, quote, confidence, review status). Rules are typed JSON validated by one Zod schema (for example certified-copy maximum age, issued-within, valid at closing, original required, signed required); a rule can only be stored with its quote. Tender facts use `extracted_facts`. RLS + `verify:rls`.
+- `[TODO]` **E3.2** — Upload a tender (and later addenda) as documents → tender in stage `reading` + `tender.read` job. Originals unchanged.
+- `[TODO]` **E3.3** — Reading job: gateway task `read_tender` → key facts, requirements and stated rules, each with page and quote. A rule without a quote from the tender is rejected. Generic for any tender; no Tshwane-specific code. Long PDFs handled within model limits.
+- `[TODO]` **E3.4** — Requirement mapping: deterministic lookup from common wording (CSD report, tax compliance PIN, B-BBEE, CIPC, municipal account…) to document categories, with a gateway suggestion only where the lookup has no match. A person can change the mapping.
+- `[TODO]` **E3.5** — Tender page (Digital Twin view): facts with page references, documents (main, addenda), requirements with their rules and quotes, confirm/edit, stage tracker.
 - `[TODO]` **E3.6** — Tender board and dashboard show real tenders: board by stage, list sorted by closing date, "closing in 7 days" count.
-- `[TODO]` **E3.7** — Run the Tshwane tender and both RFQs; record misses in handoff notes and fix the prompt/schema. E2E for upload → facts visible. Deploy and demo.
+- `[TODO]` **E3.7** — Live run on the Tshwane tender and both RFQs; record misses in handoff notes and fix the prompt/schema. E2E (fake provider) for upload → twin visible. Deploy and demo.
 
-**Cut line:** AI suggestion in E3.4 (manual mapping only); stage tracker visuals (E3.5).
-
-**Handoff notes:** _(write at end of session)_
-
----
-
-## E4 · Compliance check and gap report — 3 – 9 Nov
-
-**Goal:** for any tender, every requirement shows whether the company's confirmed documents meet it, why not if they don't, and mandatory gaps are listed first.
-
-**Session start:** read CLAUDE.md, E3 handoff notes, this epic, ARCHITECTURE.md §8 and §9. Skills: `supabase-postgres-best-practices`, `frontend-design`, `web-design-guidelines`.
-
-- `[TODO]` **E4.1** — Matching engine: pure, deterministic code (no AI). Requirement category → confirmed documents via a `Map`; apply the tender's validity rule, else the company default. Statuses: compliant, expiring, expired, missing, conflict, needs verification, unable to verify, each with a plain-language reason. Unit tests.
-- `[TODO]` **E4.2** — Cross-document checks: company name, registration number and address compared across confirmed documents (normalised: case, punctuation, "(Pty) Ltd"). Mismatches become conflict findings naming both documents. Unit tests from the sample pack's address and B-BBEE date conflicts.
-- `[TODO]` **E4.3** — Compliance page: mandatory gaps first, then all requirements with pills, the matched document, the tender page reference and the reason. Person can mark "not applicable" or override with a required reason (audit-logged). Results computed on load; no results table in Phase 1.
-- `[TODO]` **E4.4** — Gap report: a print-friendly page (browser print to PDF) listing what is missing, expired or in conflict and what to do about each. No custom PDF library.
-- `[TODO]` **E4.5** — Tender moves to stage "Compliance checked" when every mandatory requirement is resolved or overridden. E2E for upload pack + tender → gap report. Deploy and demo.
-
-**Cut line:** address comparison in E4.2 (keep name and registration number); auto stage change (E4.5).
+**Cut line:** gateway suggestion in E3.4 (manual mapping only); stage tracker visuals (E3.5).
 
 **Handoff notes:** _(write at end of session)_
 
 ---
 
-## E5 · Pilot and handover — 10 – 13 Nov
+## E4 · Compliance and gap report — 5 – 11 Nov
 
-**Goal:** Phase 1 runs on real tenders and Thulani's real pack, live on his own accounts, with documentation he and a future developer can follow.
+**Goal:** for any tender, every requirement shows whether the company's confirmed evidence meets the rules that tender states, why not if it doesn't, mandatory gaps listed first, and a person records a decision on each.
+
+**Session start:** read CLAUDE.md, E3 handoff notes, this epic, the Architecture rules, ARCHITECTURE.md §8 and §9. Skills: `supabase-postgres-best-practices`, `frontend-design`, `web-design-guidelines`.
+
+- `[TODO]` **E4.1** — Schema: `requirement_decisions` (company, requirement, decision confirmed/overridden/not applicable, reason required for overridden and not applicable, decided by/at, snapshot of the computed result). Append-only. RLS + `verify:rls`.
+- `[TODO]` **E4.2** — Rule engine: pure, deterministic code (no AI). Requirement + its stated rules + confirmed evidence + closing date → compliant, expiring, expired, missing, conflict, needs verification or unable to verify, each with a plain-language reason. Applies only the rules on the requirement; with no rule, checks presence, confirmation and the document's own validity at closing. `Map` lookups. Unit tests including "tender silent → no age limit" and "tender states 3 months → stamp of 21 Jan 2026 is too old".
+- `[TODO]` **E4.3** — Cross-document checks: company name, registration number and address across confirmed evidence (normalised: case, punctuation, "(Pty) Ltd"), plus conflicting dates for the same certificate. Mismatches become conflict findings naming both documents. Unit tests from the sample pack's address and B-BBEE date conflicts.
+- `[TODO]` **E4.4** — Compliance page: mandatory gaps first, then every requirement with its pill, matched evidence, tender page reference, rule quote and reason. Decisions with reasons are audit-logged and emit events. Results computed on load; decisions stored.
+- `[TODO]` **E4.5** — Gap report: a print-friendly page (browser print to PDF) listing what is missing, expired or in conflict, the rule and page behind each, and what to do. No PDF library.
+- `[TODO]` **E4.6** — Tender moves to stage `checked` when every mandatory requirement has a decision. E2E for pack + tender → gap report. Deploy and demo.
+
+**Cut line:** address comparison in E4.3 (keep name and registration number); automatic stage change (E4.6).
+
+**Handoff notes:** _(write at end of session)_
+
+---
+
+## E5 · Pilot and handover — 12 – 18 Nov
+
+**Goal:** Phase 1 runs on real tenders and Thulani's real pack, live on his own accounts, with documentation he and a future developer can follow, and ownership transferred on final payment.
 
 **Session start:** read CLAUDE.md, E4 handoff notes, this epic, all of ARCHITECTURE.md. Skills: `supabase`, `web-design-guidelines`.
 
 - `[TODO]` **E5.1** — Pilot: run the Tshwane tender, both RFQs and his pack end to end. Log every wrong or missed finding in `docs/PILOT.md`.
 - `[TODO]` **E5.2** — Fix pilot findings (timeboxed to one day; the rest becomes a list for him).
-- `[TODO]` **E5.3** — Security pass: `verify:rls` covers every table; E2E proves one company cannot see another's data; `supabase db advisors` clean; no secrets in the client bundle; storage policies checked.
-- `[TODO]` **E5.4** — Go live on his accounts: Vercel and Supabase under his ownership (transfer or fresh project + migrations), his Anthropic key, auth redirect URLs, spend limit confirmed.
-- `[TODO]` **E5.5** — Handover docs: a two-page user guide, an admin runbook (env vars, deploys, migrations, rotating keys), ARCHITECTURE.md and API_AND_DATA_FLOW.md brought up to date.
-- `[TODO]` **E5.6** — Final sign-off checklist with the client; start of the 30-day bug-fix period recorded.
+- `[TODO]` **E5.3** — Security pass: `verify:rls` covers every table and storage policy; E2E proves one company cannot see another's data; `supabase db advisors` clean; no secrets in the client bundle; jobs route protected.
+- `[TODO]` **E5.4** — Go live on his accounts: Vercel and Supabase under his ownership (transfer or fresh project + migrations), his Anthropic key, auth redirect URLs and email delivery, spend limit confirmed.
+- `[TODO]` **E5.5** — Handover docs: a two-page user guide, an admin runbook (env vars, deploys, migrations, jobs, rotating keys, adding an AI provider), ARCHITECTURE.md and API_AND_DATA_FLOW.md brought up to date.
+- `[TODO]` **E5.6** — Final sign-off checklist; on final payment transfer the GitHub repository, tag `m5`, and record the start of the 30-day bug-fix period.
 
 **Cut line:** user guide shortened to one page (E5.5).
 
@@ -227,18 +272,26 @@ the env vars to deploy.
 
 ## Waiting on the client
 
-| Item                                                          | Needed by | Status                                     |
-| ------------------------------------------------------------- | --------- | ------------------------------------------ |
-| Signed quote / first 50% for E1                               | E1        | Quote sent                                 |
-| Anthropic account with a developer invite to "Procurement OS" | E2.3      | Steps sent                                 |
-| Written POPIA consent for AI processing of company documents  | E2.8      | Not requested yet                          |
-| His rules for certified-copy and statement age                | E2.5      | Defaulting to 90 days until he answers     |
-| City of Tshwane Q02-O1-2026-27 tender PDF (32 pages)          | E3.7      | Not received; the two RFQ PDFs are in hand |
-| Vercel and Supabase accounts in his name                      | E5.4      | Not requested yet                          |
+| Item                                                          | Needed by             | Status                                     |
+| ------------------------------------------------------------- | --------------------- | ------------------------------------------ |
+| Approval of the architecture and roadmap document             | E1.5                  | Sent 8 Oct                                 |
+| Approval of Milestone 1.5 (R2,000) and the 18 Nov completion  | E1.5                  | Sent 8 Oct                                 |
+| First 50% of Milestone 1.5                                    | E1.5                  | After approval                             |
+| GitHub username, for read access to the repository            | E1.5                  | Requested in the architecture document     |
+| Anthropic account with a developer invite to "Procurement OS" | E1.5.6 live run, E2.3 | Steps sent                                 |
+| Written POPIA consent for AI processing of company documents  | E2.7                  | Requested in the architecture document     |
+| City of Tshwane Q02-O1-2026-27 tender PDF (32 pages)          | E3.7                  | Not received; the two RFQ PDFs are in hand |
+| Vercel and Supabase accounts in his name                      | E5.4                  | Not requested yet                          |
 
-## Later phases (not in Phase 1)
+**Waiting on us:** E1.9's manual steps (Vercel env vars, Supabase auth URLs, email delivery decision); see E1 handoff notes.
 
-Bid / no-bid engine · BOQ and pricing scenarios (VAT, markup vs margin) · MBD form intelligence · submission pack builder, human approval gate and lock · subscription product for other companies · supplier and RFQ engine · company brain / search · projects, logistics, finance.
+## Roadmap after Phase 1
+
+Each stage is scoped and quoted separately. Build numbers refer to the client's Master Developer Booklet.
+
+- **V1** (completes the golden path): bid / review / no-bid · BOQ extraction and pricing scenarios · submission pack builder · human approval and document lock · submission record · tasks and notifications · executive dashboard · basic AI orchestration. _Builds 7.05, 7.07–7.13, 7.25–7.27._
+- **V1.5 / V2:** supplier intelligence · automated supplier RFQs · quote comparison · bid register and follow-ups · Company Brain · human completion centre · verification and trust engine · high-volume tender processing · multi-company SaaS (sign-up, plans, billing). _Builds 7.06, 7.14, 7.29, 7.37–7.40, 7.42–7.45._
+- **Later:** opportunity discovery from portals · award-to-project · project management · procurement and purchase orders · logistics and proof of delivery · invoicing, payments and profitability · contract intelligence · email/Teams/WhatsApp · AI workforce at scale · B2B procurement network. _Builds 7.15–7.21, 7.28, 7.30–7.36, 7.41._
 
 ## Completion log
 

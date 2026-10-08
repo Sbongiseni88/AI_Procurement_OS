@@ -1,5 +1,5 @@
 # AI Procurement OS
-test push
+
 Tender compliance checker for South African bidders. Upload a tender and your company
 documents, and it shows what the tender requires, which documents meet it, and which are
 **expired, expiring, certified too long ago, missing or in conflict**. AI reads the
